@@ -1,13 +1,15 @@
 import { useState, useEffect } from "react";
+import { db, auth } from "./firebase";
+import {
+  collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy
+} from "firebase/firestore";
+import {
+  signInWithEmailAndPassword, signOut, onAuthStateChanged
+} from "firebase/auth";
 
-const PRINT_CSS = `@media print {
-  .no-print { display: none !important; }
-  .print-area { display: block !important; }
-}`;
-
+const PRINT_CSS = `@media print { .no-print { display: none !important; } }`;
 const SITES  = ["楽天市場", "Yahoo!ショッピング", "その他"];
 const CARDS  = ["楽天カード", "PayPayカード", "その他"];
-const STORAGE_KEY = "purchase-tool-v3";
 
 const genMonths = () => {
   const now = new Date();
@@ -22,20 +24,6 @@ const genMonths = () => {
 const MONTHS     = genMonths();
 const THIS_MONTH = MONTHS[1]?.value || MONTHS[0]?.value;
 
-const DEMO = [
-  { id:1,  site:"楽天市場",          productName:"はちみつ 国産 500g",              instructedPrice:"3280", pointAdjust:false, note:"", status:"購入済", orderedAt:"2026-03-01", actualPrice:"3280", orderNo:"R-111111111", cardType:"楽天カード",  settledAt:"",           settleMonth:THIS_MONTH },
-  { id:2,  site:"Yahoo!ショッピング", productName:"オリーブオイル エキストラバージン",  instructedPrice:"3280", pointAdjust:false, note:"", status:"購入済", orderedAt:"2026-03-01", actualPrice:"3280", orderNo:"Y-222222222", cardType:"楽天カード",  settledAt:"",           settleMonth:THIS_MONTH },
-  { id:3,  site:"楽天市場",          productName:"プロテインバー 12本セット",         instructedPrice:"1980", pointAdjust:true,  note:"", status:"購入済", orderedAt:"2026-03-05", actualPrice:"1980", orderNo:"R-333333333", cardType:"PayPayカード", settledAt:"",           settleMonth:THIS_MONTH },
-  { id:4,  site:"Yahoo!ショッピング", productName:"抹茶パウダー 業務用",               instructedPrice:"4500", pointAdjust:false, note:"", status:"照合済", orderedAt:"2026-02-20", actualPrice:"4500", orderNo:"Y-444444444", cardType:"PayPayカード", settledAt:"2026-03-10", settleMonth:"2026-03" },
-  { id:5,  site:"楽天市場",          productName:"ナッツ詰め合わせ 1kg",              instructedPrice:"3800", pointAdjust:false, note:"", status:"精算済", orderedAt:"2026-02-10", actualPrice:"3750", orderNo:"R-555555555", cardType:"楽天カード",  settledAt:"2026-02-28", settleMonth:"2026-02" },
-  { id:6,  site:"楽天市場",          productName:"緑茶 有機栽培 100g",               instructedPrice:"2200", pointAdjust:false, note:"", status:"精算済", orderedAt:"2026-02-12", actualPrice:"2200", orderNo:"R-666666666", cardType:"楽天カード",  settledAt:"2026-02-28", settleMonth:"2026-03" },
-  { id:7,  site:"楽天市場",          productName:"黒糖 沖縄産 500g",                 instructedPrice:"1500", pointAdjust:true,  note:"", status:"精算済", orderedAt:"2026-02-18", actualPrice:"1500", orderNo:"R-777777777", cardType:"楽天カード",  settledAt:"2026-03-05", settleMonth:"2026-03" },
-  { id:8,  site:"Yahoo!ショッピング", productName:"コーヒー豆 ブレンド 200g",          instructedPrice:"2980", pointAdjust:false, note:"", status:"精算済", orderedAt:"2026-02-22", actualPrice:"2800", orderNo:"Y-888888888", cardType:"楽天カード",  settledAt:"2026-03-08", settleMonth:"2026-03" },
-  { id:9,  site:"Yahoo!ショッピング", productName:"チアシード 300g",                  instructedPrice:"1800", pointAdjust:false, note:"", status:"精算済", orderedAt:"2026-02-14", actualPrice:"1800", orderNo:"Y-999999999", cardType:"PayPayカード", settledAt:"2026-03-02", settleMonth:"2026-03" },
-  { id:10, site:"楽天市場",          productName:"アーモンドミルク 1L×6本",           instructedPrice:"3600", pointAdjust:false, note:"", status:"精算済", orderedAt:"2026-02-16", actualPrice:"3600", orderNo:"R-101010101", cardType:"PayPayカード", settledAt:"2026-03-04", settleMonth:"2026-03" },
-  { id:11, site:"その他",            productName:"ごま油 太白 450g",                  instructedPrice:"1200", pointAdjust:true,  note:"", status:"精算済", orderedAt:"2026-02-25", actualPrice:"1100", orderNo:"O-111111111", cardType:"PayPayカード", settledAt:"2026-03-12", settleMonth:"2026-03" },
-];
-
 const STATUS_STYLE = {
   購入済: "bg-blue-100 text-blue-700",
   照合済: "bg-yellow-100 text-yellow-700",
@@ -43,6 +31,12 @@ const STATUS_STYLE = {
 };
 
 export default function App() {
+  const [user,        setUser]        = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [email,       setEmail]       = useState("");
+  const [password,    setPassword]    = useState("");
+  const [loginError,  setLoginError]  = useState("");
+
   const [items,       setItems]       = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [tab,         setTab]         = useState("list");
@@ -63,19 +57,46 @@ export default function App() {
     return () => document.head.removeChild(style);
   }, []);
 
+  // 認証状態の監視
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await window.storage.get(STORAGE_KEY);
-        setItems(res?.value ? JSON.parse(res.value) : []);
-      } catch { setItems([]); }
-      setLoading(false);
-    })();
+    const unsub = onAuthStateChanged(auth, u => {
+      setUser(u);
+      setAuthLoading(false);
+    });
+    return unsub;
   }, []);
 
-  const persist = async (next) => {
-    setItems(next);
-    try { await window.storage.set(STORAGE_KEY, JSON.stringify(next)); } catch {}
+  // Firestoreのデータ監視
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, "items"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, snap => {
+      setItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    });
+    return unsub;
+  }, [user]);
+
+  const login = async () => {
+    setLoginError("");
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch {
+      setLoginError("メールアドレスまたはパスワードが間違っています");
+    }
+  };
+
+  const logout = () => signOut(auth);
+
+  const persist = async (item) => {
+    await setDoc(doc(db, "items", String(item.id)), item);
+  };
+
+  const persistAll = async (newItems) => {
+    setItems(newItems);
+    for (const item of newItems) {
+      await setDoc(doc(db, "items", String(item.id)), item);
+    }
   };
 
   const showToast = (msg, err) => {
@@ -87,25 +108,26 @@ export default function App() {
     site:"楽天市場", productName:"", instructedPrice:"", pointAdjust:false, note:"",
     status:"購入済", orderedAt:"", actualPrice:"", orderNo:"",
     cardType:"楽天カード", settledAt:"", settleMonth:THIS_MONTH,
+    createdAt: Date.now(),
   });
 
   const openNew  = () => { setForm(blankForm()); setEditId(null); setShowForm(true); };
   const openEdit = (item) => { setForm({...item}); setEditId(item.id); setShowForm(true); };
   const ff = (v) => setForm(p => ({...p, ...v}));
 
-  const saveForm = () => {
+  const saveForm = async () => {
     if (!form.productName || !form.instructedPrice) return alert("商品名と指示金額は必須です");
-    const next = editId
-      ? items.map(i => i.id === editId ? {...form} : i)
-      : [{...form, id: Date.now()}, ...items];
-    persist(next);
+    const item = editId ? {...form} : {...form, id: Date.now(), createdAt: Date.now()};
+    await persist(item);
+    if (!editId) setItems(prev => [item, ...prev]);
     setShowForm(false);
     showToast(editId ? "更新しました" : "登録しました");
   };
 
-  const deleteItem = (id) => {
+  const deleteItem = async (id) => {
     if (!confirm("削除しますか？")) return;
-    persist(items.filter(i => i.id !== id));
+    await deleteDoc(doc(db, "items", String(id)));
+    setItems(prev => prev.filter(i => i.id !== id));
     setShowForm(false);
     showToast("削除しました", true);
   };
@@ -114,7 +136,7 @@ export default function App() {
     setCheckInputs(p => ({...p, [id]: {...(p[id]||{}), [key]: val}}));
   const getCI = (id) => checkInputs[id] || { usedAt:"", usedAmount:"" };
 
-  const handleCheck = (item) => {
+  const handleCheck = async (item) => {
     const inp = getCI(item.id);
     if (!inp.usedAt || !inp.usedAmount) { alert("利用日と金額を入力してください"); return; }
     const dupSaved = items.filter(i =>
@@ -127,15 +149,17 @@ export default function App() {
       String(checkInputs[i.id]?.usedAmount) === String(inp.usedAmount)
     );
     const dups = [...dupSaved, ...dupInput];
-    const doSave = () => persist(items.map(i => i.id !== item.id ? i : {
-      ...i, status:"照合済", settledAt:inp.usedAt, actualPrice:inp.usedAmount,
-    }));
+    const doSave = async () => {
+      const updated = {...item, status:"照合済", settledAt:inp.usedAt, actualPrice:inp.usedAmount};
+      await persist(updated);
+      setItems(prev => prev.map(i => i.id !== item.id ? i : updated));
+    };
     if (dups.length > 0) {
       setDupAlert({
         msg: `利用日 ${inp.usedAt}、金額 ¥${Number(inp.usedAmount).toLocaleString()} が以下の案件と重複しています。\n\n${dups.map(d=>`・${d.productName}`).join("\n")}\n\n1件の明細を複数案件に登録している可能性があります。\n確認の上、問題なければ「照合済にする」を押してください。`,
         onConfirm: doSave,
       });
-    } else { doSave(); }
+    } else { await doSave(); }
   };
 
   const counts = { 購入済:0, 照合済:0, 精算済:0 };
@@ -150,44 +174,60 @@ export default function App() {
   const pendingCheck = items.filter(i => i.status==="購入済");
   const doneCheck    = items.filter(i => i.status==="照合済");
 
-  // 報告書データ
-  const reportMonth    = MONTHS.find(m => m.value===filterMonth)?.label || filterMonth;
-  const reportItems    = items.filter(i => i.status==="精算済" && i.settleMonth===filterMonth);
-  const reportTotal    = reportItems.reduce((s,i)=>s+(Number(i.actualPrice)||0),0);
-  const today          = new Date().toLocaleDateString("ja-JP");
+  const reportMonth = MONTHS.find(m => m.value===filterMonth)?.label || filterMonth;
+  const reportItems = items.filter(i => i.status==="精算済" && i.settleMonth===filterMonth);
+  const reportTotal = reportItems.reduce((s,i)=>s+(Number(i.actualPrice)||0),0);
+  const today       = new Date().toLocaleDateString("ja-JP");
 
-  if (loading) return (
+  // ローディング中
+  if (authLoading) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400 text-sm">読み込み中...</div>
   );
 
-  // 印刷モード：報告書のみ全画面表示
+  // ログイン画面
+  if (!user) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm space-y-4">
+        <h1 className="text-xl font-bold text-gray-800 text-center">📦 仕入れ個人管理</h1>
+        <div>
+          <label className="text-sm text-gray-500">メールアドレス</label>
+          <input type="email" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base"
+            placeholder="メールアドレス" value={email} onChange={e => setEmail(e.target.value)} />
+        </div>
+        <div>
+          <label className="text-sm text-gray-500">パスワード</label>
+          <input type="password" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base"
+            placeholder="パスワード" value={password} onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && login()} />
+        </div>
+        {loginError && <p className="text-sm text-red-500">{loginError}</p>}
+        <button onClick={login} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold text-base">
+          ログイン
+        </button>
+      </div>
+    </div>
+  );
+
+  // 印刷モード
   if (printMode) return (
     <div className="min-h-screen bg-white p-6 max-w-3xl mx-auto">
       <div className="no-print flex items-center justify-between mb-6">
         <button onClick={() => setPrintMode(false)} className="text-sm text-gray-500 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50">← 戻る</button>
         <div className="text-sm text-gray-500">ブラウザの <strong>Ctrl+P</strong>（Mac: ⌘+P）で印刷・PDF保存できます</div>
       </div>
-
-      {/* 報告書本体 */}
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">仕入れ建て替え精算報告書</h1>
           <p className="text-sm text-gray-500 mt-1">精算月: {reportMonth}　／　出力日: {today}</p>
         </div>
-
-        {reportItems.length === 0 && (
-          <div className="text-center text-gray-400 py-12 border border-dashed border-gray-200 rounded-xl">精算済みの案件がありません</div>
-        )}
-
+        {reportItems.length === 0 && <div className="text-center text-gray-400 py-12 border border-dashed border-gray-200 rounded-xl">精算済みの案件がありません</div>}
         {CARDS.map(card => {
           const ci = reportItems.filter(i => i.cardType === card);
           if (ci.length === 0) return null;
           const ct = ci.reduce((s,i)=>s+(Number(i.actualPrice)||0),0);
           return (
             <div key={card}>
-              <div className="text-sm font-bold text-indigo-700 bg-indigo-50 border-l-4 border-indigo-500 px-3 py-2 rounded-r-lg mb-2">
-                💳 {card}
-              </div>
+              <div className="text-sm font-bold text-indigo-700 bg-indigo-50 border-l-4 border-indigo-500 px-3 py-2 rounded-r-lg mb-2">💳 {card}</div>
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="bg-gray-50 text-xs text-gray-500">
@@ -218,7 +258,6 @@ export default function App() {
             </div>
           );
         })}
-
         {reportItems.length > 0 && (
           <div className="bg-indigo-600 text-white rounded-xl p-5 flex justify-between items-center">
             <div>
@@ -234,8 +273,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
-      <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-30">
+      <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-30 flex items-center justify-between">
         <h1 className="text-lg font-bold text-gray-800">📦 仕入れ個人管理</h1>
+        <button onClick={logout} className="text-xs text-gray-400 border border-gray-200 px-3 py-1.5 rounded-lg">ログアウト</button>
       </div>
 
       <div className="bg-white border-b border-gray-200 flex sticky top-14 z-20">
@@ -267,7 +307,8 @@ export default function App() {
                 <button onClick={() => setFilterSt("すべて")} className="text-xs text-indigo-400">クリア ✕</button>
               </div>
             )}
-            {listItems.length === 0 && <div className="text-center text-gray-400 py-12 bg-white rounded-xl">案件がありません</div>}
+            {loading && <div className="text-center text-gray-400 py-8">読み込み中...</div>}
+            {!loading && listItems.length === 0 && <div className="text-center text-gray-400 py-12 bg-white rounded-xl">案件がありません</div>}
             {listItems.map(item => {
               const diff = Number(item.actualPrice) - Number(item.instructedPrice);
               return (
@@ -439,8 +480,6 @@ export default function App() {
                 🖨 印刷・PDF
               </button>
             </div>
-
-            {/* プレビュー */}
             <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
               <div>
                 <div className="text-base font-bold text-gray-800">仕入れ建て替え精算報告書</div>
@@ -482,13 +521,10 @@ export default function App() {
         )}
       </div>
 
-      {/* ＋ボタン */}
-      {!printMode && (
-        <button onClick={openNew}
-          className="fixed bottom-6 right-4 bg-indigo-600 text-white rounded-full w-14 h-14 text-3xl shadow-lg hover:bg-indigo-700 transition flex items-center justify-center z-30">
-          ＋
-        </button>
-      )}
+      <button onClick={openNew}
+        className="fixed bottom-8 right-5 bg-indigo-600 text-white rounded-full w-16 h-16 text-3xl shadow-xl hover:bg-indigo-700 transition flex items-center justify-center z-30">
+        ＋
+      </button>
 
       {/* 入力モーダル */}
       {showForm && (
@@ -502,7 +538,7 @@ export default function App() {
               <div className="p-5 space-y-5">
                 <div className="space-y-3">
                   <div className="text-xs font-bold text-indigo-600">📋 購入情報</div>
-                  <div><label className="text-xs text-gray-500">購入サイト</label>
+                  <div><label className="text-sm text-gray-500">購入サイト</label>
                     <select className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.site} onChange={e=>ff({site:e.target.value})}>
                       {SITES.map(s=><option key={s}>{s}</option>)}
                     </select>
@@ -525,7 +561,7 @@ export default function App() {
                 <div className="space-y-3">
                   <div className="text-xs font-bold text-blue-600">🛒 購入報告</div>
                   <div className="flex gap-3">
-                    <div className="flex-1"><label className="text-xs text-gray-500">注文日</label>
+                    <div className="flex-1"><label className="text-sm text-gray-500">注文日</label>
                       <input type="date" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.orderedAt||""} onChange={e=>ff({orderedAt:e.target.value})} />
                     </div>
                     <div className="flex-1"><label className="text-sm text-gray-500">購入金額（円）</label>
@@ -545,7 +581,7 @@ export default function App() {
                 <div className="space-y-3">
                   <div className="text-xs font-bold text-yellow-600">🧾 明細照合</div>
                   <div className="flex gap-3">
-                    <div className="flex-1"><label className="text-xs text-gray-500">クレカ</label>
+                    <div className="flex-1"><label className="text-sm text-gray-500">クレカ</label>
                       <select className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.cardType||"楽天カード"} onChange={e=>ff({cardType:e.target.value})}>
                         {CARDS.map(c=><option key={c}>{c}</option>)}
                       </select>
@@ -572,12 +608,13 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-                <div className="flex gap-2 pt-1 pb-4">
-                  {editId && <button onClick={()=>deleteItem(editId)} className="px-5 py-3 text-base text-red-400 border border-red-200 rounded-xl min-w-16">削除</button>}
-                  {editId && <button onClick={()=>{
+                <div className="flex gap-3 pt-2 pb-4">
+                  {editId && <button onClick={()=>deleteItem(editId)} className="px-5 py-3 text-base text-red-400 border border-red-200 rounded-xl">削除</button>}
+                  {editId && <button onClick={async ()=>{
                     const src = items.find(i=>i.id===editId);
-                    const duped = {...src, id:Date.now(), status:"購入済", orderedAt:"", actualPrice:"", orderNo:"", settledAt:""};
-                    persist([duped, ...items]);
+                    const duped = {...src, id:Date.now(), createdAt:Date.now(), status:"購入済", orderedAt:"", actualPrice:"", orderNo:"", settledAt:""};
+                    await persist(duped);
+                    setItems(prev => [duped, ...prev]);
                     setShowForm(false);
                     showToast("複製しました");
                   }} className="px-5 py-3 text-base text-indigo-500 border border-indigo-200 rounded-xl">複製</button>}
