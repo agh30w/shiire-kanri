@@ -319,7 +319,12 @@ export default function App() {
                         {item.pointAdjust && <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full">ポイント調整</span>}
                       </div>
                       <div className="font-semibold text-gray-800 truncate">{item.productName}</div>
-                      <div className="text-xs text-gray-400 mt-0.5">指示金額: ¥{Number(item.instructedPrice).toLocaleString()}{item.orderNo && <span className="ml-2 font-mono">{item.orderNo}</span>}</div>
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        指示金額: ¥{Number(item.instructedPrice).toLocaleString()}
+                        {item.actualPrice && <span className="ml-2">実績: <span className="font-medium text-gray-600">¥{Number(item.actualPrice).toLocaleString()}</span></span>}
+                        {item.orderedAt && <span className="ml-2">注文日: {item.orderedAt}</span>}
+                        {item.orderNo && <span className="ml-2 font-mono">{item.orderNo}</span>}
+                      </div>
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full font-medium flex-shrink-0 ${STATUS_STYLE[item.status]}`}>{item.status}</span>
                   </div>
@@ -567,8 +572,15 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-                <div className="flex gap-3 pt-2 pb-4">
+                <div className="flex gap-2 pt-1 pb-4">
                   {editId && <button onClick={()=>deleteItem(editId)} className="px-5 py-3 text-base text-red-400 border border-red-200 rounded-xl min-w-16">削除</button>}
+                  {editId && <button onClick={()=>{
+                    const src = items.find(i=>i.id===editId);
+                    const duped = {...src, id:Date.now(), status:"購入済", orderedAt:"", actualPrice:"", orderNo:"", settledAt:""};
+                    persist([duped, ...items]);
+                    setShowForm(false);
+                    showToast("複製しました");
+                  }} className="px-5 py-3 text-base text-indigo-500 border border-indigo-200 rounded-xl">複製</button>}
                   <button onClick={()=>setShowForm(false)} className="flex-1 border border-gray-200 text-gray-600 py-3 rounded-xl text-base">キャンセル</button>
                   <button onClick={saveForm} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl text-base font-semibold">保存する</button>
                 </div>
