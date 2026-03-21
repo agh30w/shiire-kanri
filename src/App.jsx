@@ -427,8 +427,14 @@ export default function App() {
               <div className="text-sm opacity-80 mb-1">{MONTHS.find(m=>m.value===filterMonth)?.label} 建て替え合計</div>
               <div className="text-3xl font-bold mb-3">¥{monthTotal.toLocaleString()}</div>
               <div className="grid grid-cols-2 gap-2">
-                <div className="bg-white bg-opacity-20 rounded-lg p-2 text-center"><div className="text-xs opacity-70">精算済み</div><div className="font-bold">¥{paidTotal.toLocaleString()}</div></div>
-                <div className="bg-white bg-opacity-20 rounded-lg p-2 text-center"><div className="text-xs opacity-70">未精算</div><div className="font-bold">¥{(monthTotal-paidTotal).toLocaleString()}</div></div>
+                <div className="bg-white bg-opacity-20 rounded-lg p-2 text-center">
+                  <div className="text-xs opacity-70 text-white">精算済み</div>
+                  <div className="font-bold text-white">¥{paidTotal.toLocaleString()}</div>
+                </div>
+                <div className="bg-white bg-opacity-20 rounded-lg p-2 text-center">
+                  <div className="text-xs opacity-70 text-white">未精算</div>
+                  <div className="font-bold text-white">¥{(monthTotal-paidTotal).toLocaleString()}</div>
+                </div>
               </div>
             </div>
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
