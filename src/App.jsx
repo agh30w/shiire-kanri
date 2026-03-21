@@ -119,7 +119,6 @@ export default function App() {
     if (!form.productName || !form.instructedPrice) return alert("商品名と指示金額は必須です");
     const item = editId ? {...form} : {...form, id: Date.now(), createdAt: Date.now()};
     await persist(item);
-    if (!editId) setItems(prev => [item, ...prev]);
     setShowForm(false);
     showToast(editId ? "更新しました" : "登録しました");
   };
@@ -127,7 +126,6 @@ export default function App() {
   const deleteItem = async (id) => {
     if (!confirm("削除しますか？")) return;
     await deleteDoc(doc(db, "items", String(id)));
-    setItems(prev => prev.filter(i => i.id !== id));
     setShowForm(false);
     showToast("削除しました", true);
   };
@@ -614,7 +612,6 @@ export default function App() {
                     const src = items.find(i=>i.id===editId);
                     const duped = {...src, id:Date.now(), createdAt:Date.now(), status:"購入済", orderedAt:"", actualPrice:"", orderNo:"", settledAt:""};
                     await persist(duped);
-                    setItems(prev => [duped, ...prev]);
                     setShowForm(false);
                     showToast("複製しました");
                   }} className="px-5 py-3 text-base text-indigo-500 border border-indigo-200 rounded-xl">複製</button>}
