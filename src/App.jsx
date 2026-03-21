@@ -67,8 +67,8 @@ export default function App() {
     (async () => {
       try {
         const res = await window.storage.get(STORAGE_KEY);
-        setItems(res?.value ? JSON.parse(res.value) : DEMO);
-      } catch { setItems(DEMO); }
+        setItems(res?.value ? JSON.parse(res.value) : []);
+      } catch { setItems([]); }
       setLoading(false);
     })();
   }, []);
@@ -234,20 +234,20 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
-      <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-30">
-        <h1 className="text-base font-bold text-gray-800">📦 仕入れ個人管理</h1>
+      <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-30">
+        <h1 className="text-lg font-bold text-gray-800">📦 仕入れ個人管理</h1>
       </div>
 
-      <div className="bg-white border-b border-gray-200 flex sticky top-12 z-20">
+      <div className="bg-white border-b border-gray-200 flex sticky top-14 z-20">
         {[{id:"list",label:"案件一覧"},{id:"check",label:"明細照合"},{id:"monthly",label:"月次集計"},{id:"report",label:"報告書"}].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`flex-1 py-3 text-sm font-medium border-b-2 transition ${tab===t.id?"border-indigo-600 text-indigo-600":"border-transparent text-gray-400"}`}>
+            className={`flex-1 py-4 text-base font-medium border-b-2 transition ${tab===t.id?"border-indigo-600 text-indigo-600":"border-transparent text-gray-400"}`}>
             {t.label}
           </button>
         ))}
       </div>
 
-      <div className="p-3 max-w-2xl mx-auto">
+      <div className="p-4 max-w-2xl mx-auto overflow-x-hidden">
 
         {/* 案件一覧 */}
         {tab === "list" && (
@@ -255,9 +255,9 @@ export default function App() {
             <div className="grid grid-cols-3 gap-2">
               {Object.entries(counts).map(([st, n]) => (
                 <div key={st} onClick={() => setFilterSt(filterSt===st?"すべて":st)}
-                  className={`bg-white rounded-xl border p-3 text-center cursor-pointer transition ${filterSt===st?"border-indigo-400 ring-1 ring-indigo-300":"border-gray-200"}`}>
-                  <div className="text-2xl font-bold text-gray-700">{n}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">{st}</div>
+                  className={`bg-white rounded-xl border p-4 text-center cursor-pointer transition ${filterSt===st?"border-indigo-400 ring-1 ring-indigo-300":"border-gray-200"}`}>
+                  <div className="text-3xl font-bold text-gray-700">{n}</div>
+                  <div className="text-sm text-gray-400 mt-1">{st}</div>
                 </div>
               ))}
             </div>
@@ -278,8 +278,8 @@ export default function App() {
                         <span className="text-xs text-gray-400">{item.site}</span>
                         {item.pointAdjust && <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full">ポイント調整</span>}
                       </div>
-                      <div className="font-semibold text-gray-800 truncate">{item.productName}</div>
-                      <div className="text-sm text-gray-500 mt-0.5 flex flex-wrap gap-x-2">
+                      <div className="font-semibold text-gray-800 truncate text-base">{item.productName}</div>
+                      <div className="text-sm text-gray-500 mt-1 flex flex-wrap gap-x-2">
                         <span>指示: <span className="font-medium text-gray-700">¥{Number(item.instructedPrice).toLocaleString()}</span></span>
                         {item.actualPrice && (
                           <span className={`font-medium ${diff>0?"text-red-500":diff<0?"text-green-500":"text-gray-700"}`}>
@@ -490,30 +490,30 @@ export default function App() {
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-40">
           <div className="min-h-full flex items-end sm:items-center justify-center">
             <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl">
-              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                <h2 className="font-bold text-gray-800">{editId?"案件を編集":"新規登録"}</h2>
-                <button onClick={() => setShowForm(false)} className="text-gray-400 text-xl leading-none">✕</button>
+              <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                <h2 className="font-bold text-gray-800 text-lg">{editId?"案件を編集":"新規登録"}</h2>
+                <button onClick={() => setShowForm(false)} className="text-gray-400 text-2xl leading-none w-10 h-10 flex items-center justify-center">✕</button>
               </div>
-              <div className="p-4 space-y-4">
+              <div className="p-5 space-y-5">
                 <div className="space-y-3">
                   <div className="text-xs font-bold text-indigo-600">📋 購入情報</div>
                   <div><label className="text-xs text-gray-500">購入サイト</label>
-                    <select className="w-full border border-gray-200 rounded-lg px-3 py-2 mt-1 text-sm" value={form.site} onChange={e=>ff({site:e.target.value})}>
+                    <select className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.site} onChange={e=>ff({site:e.target.value})}>
                       {SITES.map(s=><option key={s}>{s}</option>)}
                     </select>
                   </div>
-                  <div><label className="text-xs text-gray-500">商品名 *</label>
-                    <input className="w-full border border-gray-200 rounded-lg px-3 py-2 mt-1 text-sm" placeholder="商品名" value={form.productName||""} onChange={e=>ff({productName:e.target.value})} />
+                  <div><label className="text-sm text-gray-500">商品名 *</label>
+                    <input className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" placeholder="商品名" value={form.productName||""} onChange={e=>ff({productName:e.target.value})} />
                   </div>
-                  <div><label className="text-xs text-gray-500">指示金額（円）*</label>
-                    <input inputMode="numeric" className="w-full border border-gray-200 rounded-lg px-3 py-2 mt-1 text-sm" placeholder="3280" value={form.instructedPrice||""} onChange={e=>ff({instructedPrice:e.target.value})} />
+                  <div><label className="text-sm text-gray-500">指示金額（円）*</label>
+                    <input inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" placeholder="3280" value={form.instructedPrice||""} onChange={e=>ff({instructedPrice:e.target.value})} />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" id="pa" checked={!!form.pointAdjust} onChange={e=>ff({pointAdjust:e.target.checked})} />
-                    <label htmlFor="pa" className="text-sm text-gray-600">ポイント調整要</label>
+                  <div className="flex items-center gap-3">
+                    <input type="checkbox" id="pa" checked={!!form.pointAdjust} onChange={e=>ff({pointAdjust:e.target.checked})} className="w-5 h-5" />
+                    <label htmlFor="pa" className="text-base text-gray-600">ポイント調整要</label>
                   </div>
-                  <div><label className="text-xs text-gray-500">備考</label>
-                    <input className="w-full border border-gray-200 rounded-lg px-3 py-2 mt-1 text-sm" placeholder="備考（任意）" value={form.note||""} onChange={e=>ff({note:e.target.value})} />
+                  <div><label className="text-sm text-gray-500">備考</label>
+                    <input className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" placeholder="備考（任意）" value={form.note||""} onChange={e=>ff({note:e.target.value})} />
                   </div>
                 </div>
                 <div className="border-t border-gray-100"/>
@@ -521,19 +521,19 @@ export default function App() {
                   <div className="text-xs font-bold text-blue-600">🛒 購入報告</div>
                   <div className="flex gap-3">
                     <div className="flex-1"><label className="text-xs text-gray-500">注文日</label>
-                      <input type="date" className="w-full border border-gray-200 rounded-lg px-3 py-2 mt-1 text-sm" value={form.orderedAt||""} onChange={e=>ff({orderedAt:e.target.value})} />
+                      <input type="date" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.orderedAt||""} onChange={e=>ff({orderedAt:e.target.value})} />
                     </div>
-                    <div className="flex-1"><label className="text-xs text-gray-500">購入金額（円）</label>
-                      <input inputMode="numeric" className="w-full border border-gray-200 rounded-lg px-3 py-2 mt-1 text-sm" placeholder="実購入額" value={form.actualPrice||""} onChange={e=>ff({actualPrice:e.target.value})} />
+                    <div className="flex-1"><label className="text-sm text-gray-500">購入金額（円）</label>
+                      <input inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" placeholder="実購入額" value={form.actualPrice||""} onChange={e=>ff({actualPrice:e.target.value})} />
                     </div>
                   </div>
                   {form.actualPrice && form.instructedPrice && (()=>{
                     const d=Number(form.actualPrice)-Number(form.instructedPrice);
                     if(d===0)return null;
-                    return <p className={`text-xs ${d>0?"text-red-500":"text-green-500"}`}>{d>0?`⚠ 指示より ¥${d.toLocaleString()} 高い（自己負担）`:`✓ 指示より ¥${Math.abs(d).toLocaleString()} 安い`}</p>;
+                    return <p className={`text-sm ${d>0?"text-red-500":"text-green-500"}`}>{d>0?`⚠ 指示より ¥${d.toLocaleString()} 高い（自己負担）`:`✓ 指示より ¥${Math.abs(d).toLocaleString()} 安い`}</p>;
                   })()}
-                  <div><label className="text-xs text-gray-500">注文番号</label>
-                    <input className="w-full border border-gray-200 rounded-lg px-3 py-2 mt-1 text-sm font-mono" placeholder="例: 123-4567890-1234567" value={form.orderNo||""} onChange={e=>ff({orderNo:e.target.value})} />
+                  <div><label className="text-sm text-gray-500">注文番号</label>
+                    <input className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base font-mono" placeholder="例: 123-4567890-1234567" value={form.orderNo||""} onChange={e=>ff({orderNo:e.target.value})} />
                   </div>
                 </div>
                 <div className="border-t border-gray-100"/>
@@ -541,16 +541,16 @@ export default function App() {
                   <div className="text-xs font-bold text-yellow-600">🧾 明細照合</div>
                   <div className="flex gap-3">
                     <div className="flex-1"><label className="text-xs text-gray-500">クレカ</label>
-                      <select className="w-full border border-gray-200 rounded-lg px-3 py-2 mt-1 text-sm" value={form.cardType||"楽天カード"} onChange={e=>ff({cardType:e.target.value})}>
+                      <select className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.cardType||"楽天カード"} onChange={e=>ff({cardType:e.target.value})}>
                         {CARDS.map(c=><option key={c}>{c}</option>)}
                       </select>
                     </div>
-                    <div className="flex-1"><label className="text-xs text-gray-500">決済日</label>
-                      <input type="date" className="w-full border border-gray-200 rounded-lg px-3 py-2 mt-1 text-sm" value={form.settledAt||""} onChange={e=>ff({settledAt:e.target.value})} />
+                    <div className="flex-1"><label className="text-sm text-gray-500">決済日</label>
+                      <input type="date" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.settledAt||""} onChange={e=>ff({settledAt:e.target.value})} />
                     </div>
                   </div>
-                  <div><label className="text-xs text-gray-500">精算月</label>
-                    <select className="w-full border border-gray-200 rounded-lg px-3 py-2 mt-1 text-sm" value={form.settleMonth||THIS_MONTH} onChange={e=>ff({settleMonth:e.target.value})}>
+                  <div><label className="text-sm text-gray-500">精算月</label>
+                    <select className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.settleMonth||THIS_MONTH} onChange={e=>ff({settleMonth:e.target.value})}>
                       {MONTHS.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}
                     </select>
                   </div>
@@ -558,19 +558,19 @@ export default function App() {
                 <div className="border-t border-gray-100"/>
                 <div>
                   <div className="text-xs font-bold text-gray-500 mb-2">📌 ステータス</div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-3 gap-3">
                     {Object.entries(STATUS_STYLE).map(([st,cls])=>(
                       <button key={st} onClick={()=>ff({status:st})}
-                        className={`py-2 rounded-lg text-xs font-medium border-2 transition ${form.status===st?"border-indigo-500 "+cls:"border-gray-200 text-gray-400"}`}>
+                        className={`py-3 rounded-xl text-sm font-medium border-2 transition ${form.status===st?"border-indigo-500 "+cls:"border-gray-200 text-gray-400"}`}>
                         {st}
                       </button>
                     ))}
                   </div>
                 </div>
-                <div className="flex gap-2 pt-1 pb-2">
-                  {editId && <button onClick={()=>deleteItem(editId)} className="px-4 py-2 text-sm text-red-400 border border-red-200 rounded-xl">削除</button>}
-                  <button onClick={()=>setShowForm(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm">キャンセル</button>
-                  <button onClick={saveForm} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold">保存する</button>
+                <div className="flex gap-3 pt-2 pb-4">
+                  {editId && <button onClick={()=>deleteItem(editId)} className="px-5 py-3 text-base text-red-400 border border-red-200 rounded-xl min-w-16">削除</button>}
+                  <button onClick={()=>setShowForm(false)} className="flex-1 border border-gray-200 text-gray-600 py-3 rounded-xl text-base">キャンセル</button>
+                  <button onClick={saveForm} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl text-base font-semibold">保存する</button>
                 </div>
               </div>
             </div>
