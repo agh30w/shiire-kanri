@@ -216,7 +216,7 @@ export default function App() {
       </div>
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">仕入れ建て替え精算報告書</h1>
+          <h1 className="text-2xl font-bold text-gray-900">仕入れ立て替え精算報告書</h1>
           <p className="text-sm text-gray-500 mt-1">精算月: {reportMonth}　／　出力日: {today}</p>
         </div>
         {reportItems.length === 0 && <div className="text-center text-gray-400 py-12 border border-dashed border-gray-200 rounded-xl">精算済みの案件がありません</div>}
@@ -487,7 +487,7 @@ export default function App() {
             </div>
             <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
               <div>
-                <div className="text-base font-bold text-gray-800">仕入れ建て替え精算報告書</div>
+                <div className="text-base font-bold text-gray-800">仕入れ立て替え精算報告書</div>
                 <div className="text-xs text-gray-400 mt-0.5">精算月: {reportMonth}　／　出力日: {today}</div>
               </div>
               {reportItems.length === 0 && <div className="text-center text-gray-400 py-8">精算済みの案件がありません</div>}
