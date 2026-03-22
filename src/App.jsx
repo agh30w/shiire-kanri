@@ -505,7 +505,7 @@ export default function App() {
                             <div className="font-medium text-gray-800 truncate">{item.productName}</div>
                             <div className="text-gray-400">注文日: {item.orderedAt||"—"}　明細書利用日: {item.settledAt||"—"}</div>
                           </div>
-                          <div className="font-bold text-gray-800 ml-3">¥{calcSettleAmount(item).toLocaleString()}</div>
+                          <div className="font-bold text-gray-800 ml-3">¥{calcSettleAmount(item).toLocaleString()}{Number(item.actualPrice) > Number(item.instructedPrice) && <span className="text-red-500 text-xs ml-1">+¥{(Number(item.actualPrice)-Number(item.instructedPrice)).toLocaleString()}</span>}</div>
                         </div>
                       ))}
                       <div className="flex justify-between text-xs font-bold text-indigo-700 pt-1">
