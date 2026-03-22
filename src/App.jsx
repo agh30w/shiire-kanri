@@ -160,12 +160,7 @@ export default function App() {
     } else { await doSave(); }
   };
 
-  // 精算金額の計算（指示金額より高い場合は指示金額を使用）
-  const calcSettleAmount = (item) => {
-    const actual = Number(item.actualPrice || 0);
-    const instructed = Number(item.instructedPrice || 0);
-    return actual > instructed ? instructed : actual;
-  };
+  const counts = { 購入済:0, 照合済:0, 精算済:0 };
   items.forEach(i => { if (counts[i.status] !== undefined) counts[i.status]++; });
 
   const monthItems = items.filter(i => i.settleMonth === filterMonth);
@@ -179,7 +174,7 @@ export default function App() {
 
   const reportMonth = MONTHS.find(m => m.value===filterMonth)?.label || filterMonth;
   const reportItems = items.filter(i => i.status==="精算済" && i.settleMonth===filterMonth);
-  const reportTotal = reportItems.reduce((s,i)=>s+calcSettleAmount(i),0);
+  const reportTotal = reportItems.reduce((s,i)=>s+(Number(i.actualPrice)||0),0);
   const today       = new Date().toLocaleDateString("ja-JP");
 
   // ローディング中
@@ -242,22 +237,15 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {ci.map(item => {
-                    const settleAmt = calcSettleAmount(item);
-                    const isOver = Number(item.actualPrice) > Number(item.instructedPrice);
-                    return (
-                      <tr key={item.id} className="border-b border-gray-100">
-                        <td className="px-3 py-2 font-medium text-gray-800">{item.productName}</td>
-                        <td className="px-3 py-2 text-gray-500">{item.orderedAt || "—"}</td>
-                        <td className="px-3 py-2 text-gray-500">{item.settledAt || "—"}</td>
-                        <td className="px-3 py-2 text-right font-bold text-gray-800">
-                          ¥{settleAmt.toLocaleString()}
-                          {isOver && <div className="text-xs text-red-400 font-normal">実績¥{Number(item.actualPrice).toLocaleString()}（差額自己負担）</div>}
-                        </td>
-                        <td className="px-3 py-2 text-gray-400 font-mono text-xs">{item.orderNo || "—"}</td>
-                      </tr>
-                    );
-                  })}
+                  {ci.map(item => (
+                    <tr key={item.id} className="border-b border-gray-100">
+                      <td className="px-3 py-2 font-medium text-gray-800">{item.productName}</td>
+                      <td className="px-3 py-2 text-gray-500">{item.orderedAt || "—"}</td>
+                      <td className="px-3 py-2 text-gray-500">{item.settledAt || "—"}</td>
+                      <td className="px-3 py-2 text-right font-bold text-gray-800">¥{Number(item.actualPrice||0).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-gray-400 font-mono text-xs">{item.orderNo || "—"}</td>
+                    </tr>
+                  ))}
                   <tr className="bg-indigo-50">
                     <td colSpan={3} className="px-3 py-2 font-bold text-indigo-700">{card} 小計</td>
                     <td className="px-3 py-2 text-right font-bold text-indigo-700">¥{ct.toLocaleString()}</td>
@@ -576,11 +564,11 @@ export default function App() {
                 <div className="border-t border-gray-100"/>
                 <div className="space-y-3">
                   <div className="text-xs font-bold text-blue-600">🛒 購入報告</div>
-                  <div className="flex flex-col gap-3">
-                    <div><label className="text-sm text-gray-500">注文日</label>
+                  <div className="flex gap-3">
+                    <div className="flex-1"><label className="text-sm text-gray-500">注文日</label>
                       <input type="date" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.orderedAt||""} onChange={e=>ff({orderedAt:e.target.value})} />
                     </div>
-                    <div><label className="text-sm text-gray-500">購入金額（円）</label>
+                    <div className="flex-1"><label className="text-sm text-gray-500">購入金額（円）</label>
                       <input inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" placeholder="実購入額" value={form.actualPrice||""} onChange={e=>ff({actualPrice:e.target.value})} />
                     </div>
                   </div>
