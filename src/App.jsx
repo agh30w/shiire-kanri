@@ -243,7 +243,7 @@ export default function App() {
                       <td className="px-3 py-2 font-medium text-gray-800">{item.productName}</td>
                       <td className="px-3 py-2 text-gray-500">{item.orderedAt || "—"}</td>
                       <td className="px-3 py-2 text-gray-500">{item.settledAt || "—"}</td>
-                      <td className="px-3 py-2 text-right font-bold text-gray-800">¥{Number(item.actualPrice||0).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-bold text-gray-800">¥{calcSettleAmount(item).toLocaleString()}</td>
                       <td className="px-3 py-2 text-gray-400 font-mono text-xs">{item.orderNo || "—"}</td>
                     </tr>
                   ))}
@@ -505,7 +505,7 @@ export default function App() {
                             <div className="font-medium text-gray-800 truncate">{item.productName}</div>
                             <div className="text-gray-400">注文日: {item.orderedAt||"—"}　明細書利用日: {item.settledAt||"—"}</div>
                           </div>
-                          <div className="font-bold text-gray-800 ml-3">¥{Number(item.actualPrice||0).toLocaleString()}</div>
+                          <div className="font-bold text-gray-800 ml-3">¥{calcSettleAmount(item).toLocaleString()}</div>
                         </div>
                       ))}
                       <div className="flex justify-between text-xs font-bold text-indigo-700 pt-1">
