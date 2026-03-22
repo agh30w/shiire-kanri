@@ -232,7 +232,7 @@ export default function App() {
                   <tr className="bg-gray-50 text-xs text-gray-500">
                     <th className="text-left px-3 py-2 border-b border-gray-200">商品名</th>
                     <th className="text-left px-3 py-2 border-b border-gray-200">注文日</th>
-                    <th className="text-left px-3 py-2 border-b border-gray-200">明細書利用日</th>
+                    <th className="text-left px-3 py-2 border-b border-gray-200">明細書利用日</th><th className="text-right px-3 py-2 border-b border-gray-200">指示金額</th><th className="text-right px-3 py-2 border-b border-gray-200">差分</th>
                     <th className="text-right px-3 py-2 border-b border-gray-200">明細金額</th>
                     <th className="text-left px-3 py-2 border-b border-gray-200">注文番号</th>
                   </tr>
@@ -243,7 +243,7 @@ export default function App() {
                       <td className="px-3 py-2 font-medium text-gray-800">{item.productName}</td>
                       <td className="px-3 py-2 text-gray-500">{item.orderedAt || "—"}</td>
                       <td className="px-3 py-2 text-gray-500">{item.settledAt || "—"}</td>
-                      <td className="px-3 py-2 text-right font-bold text-gray-800">¥{calcSettleAmount(item).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-bold text-gray-800">¥{calcSettleAmount(item).toLocaleString()}</td><td className="px-3 py-2 text-right text-gray-500">¥{Number(item.instructedPrice).toLocaleString()}</td><td className="px-3 py-2 text-right">{Number(item.actualPrice) > Number(item.instructedPrice) ? <span className="text-red-500 font-bold">+¥{(Number(item.actualPrice)-Number(item.instructedPrice)).toLocaleString()}</span> : <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-gray-400 font-mono text-xs">{item.orderNo || "—"}</td>
                     </tr>
                   ))}
