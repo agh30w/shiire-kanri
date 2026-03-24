@@ -209,7 +209,7 @@ export default function App() {
 
   // 印刷モード
   if (printMode) return (
-    <div className="min-h-screen bg-white p-6 max-w-3xl mx-auto">
+    <div className="min-h-screen bg-white p-6 max-w-4xl mx-auto">
       <div className="no-print flex items-center justify-between mb-6">
         <button onClick={() => setPrintMode(false)} className="text-sm text-gray-500 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50">← 戻る</button>
         <div className="text-sm text-gray-500">ブラウザの <strong>Ctrl+P</strong>（Mac: ⌘+P）で印刷・PDF保存できます</div>
@@ -223,7 +223,10 @@ export default function App() {
         {CARDS.map(card => {
           const ci = reportItems.filter(i => i.cardType === card);
           if (ci.length === 0) return null;
+          // 明細金額小計
           const ct = ci.reduce((s,i)=>s+(Number(i.actualPrice)||0),0);
+          // 請求金額小計（指示超過分は指示金額で精算）
+          const settleTotal = ci.reduce((s,i)=>s+calcSettleAmount(i),0);
           return (
             <div key={card}>
               <div className="text-sm font-bold text-indigo-700 bg-indigo-50 border-l-4 border-indigo-500 px-3 py-2 rounded-r-lg mb-2">💳 {card}</div>
@@ -231,24 +234,41 @@ export default function App() {
                 <thead>
                   <tr className="bg-gray-50 text-xs text-gray-500">
                     <th className="text-left px-3 py-2 border-b border-gray-200">商品名</th>
-                    <th className="text-left px-3 py-2 border-b border-gray-200">注文日</th>
-                    <th className="text-left px-3 py-2 border-b border-gray-200">明細書利用日</th><th className="text-right px-3 py-2 border-b border-gray-200">指示金額</th><th className="text-right px-3 py-2 border-b border-gray-200">明細金額</th><th className="text-right px-3 py-2 border-b border-gray-200">差分</th>
+                    <th className="text-left px-3 py-2 border-b border-gray-200 whitespace-nowrap">注文日</th>
+                    <th className="text-left px-3 py-2 border-b border-gray-200 whitespace-nowrap">明細書利用日</th>
+                    <th className="text-right px-3 py-2 border-b border-gray-200 whitespace-nowrap">指示金額</th>
+                    <th className="text-right px-3 py-2 border-b border-gray-200 whitespace-nowrap">明細金額</th>
+                    <th className="text-right px-3 py-2 border-b border-gray-200 whitespace-nowrap">差分</th>
+                    <th className="text-right px-3 py-2 border-b border-gray-200 whitespace-nowrap">請求金額</th>
                     <th className="text-left px-3 py-2 border-b border-gray-200">注文番号</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ci.map(item => (
-                    <tr key={item.id} className="border-b border-gray-100">
-                      <td className="px-3 py-2 font-medium text-gray-800">{item.productName}</td>
-                      <td className="px-3 py-2 text-gray-500">{item.orderedAt || "—"}</td>
-                      <td className="px-3 py-2 text-gray-500">{item.settledAt || "—"}</td>
-                      <td className="px-3 py-2 text-right text-gray-500">¥{Number(item.instructedPrice).toLocaleString()}</td><td className="px-3 py-2 text-right font-bold text-gray-800">¥{Number(item.actualPrice).toLocaleString()}</td><td className="px-3 py-2 text-right">{Number(item.actualPrice) > Number(item.instructedPrice) ? <span className="text-red-500 font-bold">+¥{(Number(item.actualPrice)-Number(item.instructedPrice)).toLocaleString()}</span> : <span className="text-gray-300">—</span>}</td>
-                      <td className="px-3 py-2 text-gray-400 font-mono text-xs">{item.orderNo || "—"}</td>
-                    </tr>
-                  ))}
+                  {ci.map(item => {
+                    const diff = Number(item.actualPrice) - Number(item.instructedPrice);
+                    const settleAmt = calcSettleAmount(item);
+                    return (
+                      <tr key={item.id} className="border-b border-gray-100">
+                        <td className="px-3 py-2 font-medium text-gray-800">{item.productName}</td>
+                        <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{item.orderedAt || "—"}</td>
+                        <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{item.settledAt || "—"}</td>
+                        <td className="px-3 py-2 text-right text-gray-500">¥{Number(item.instructedPrice).toLocaleString()}</td>
+                        <td className="px-3 py-2 text-right font-bold text-gray-800">¥{Number(item.actualPrice).toLocaleString()}</td>
+                        <td className="px-3 py-2 text-right">
+                          {diff > 0
+                            ? <span className="text-red-500 font-bold">+¥{diff.toLocaleString()}</span>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-right font-bold text-gray-800">¥{settleAmt.toLocaleString()}</td>
+                        <td className="px-3 py-2 text-gray-400 font-mono text-xs">{item.orderNo || "—"}</td>
+                      </tr>
+                    );
+                  })}
                   <tr className="bg-indigo-50">
-                    <td colSpan={3} className="px-3 py-2 font-bold text-indigo-700">{card} 小計</td>
+                    <td colSpan={4} className="px-3 py-2 font-bold text-indigo-700">{card} 小計</td>
                     <td className="px-3 py-2 text-right font-bold text-indigo-700">¥{ct.toLocaleString()}</td>
+                    <td></td>
+                    <td className="px-3 py-2 text-right font-bold text-indigo-700">¥{settleTotal.toLocaleString()}</td>
                     <td></td>
                   </tr>
                 </tbody>
@@ -494,21 +514,33 @@ export default function App() {
                 const ci = reportItems.filter(i => i.cardType===card);
                 if (ci.length===0) return null;
                 const ct = ci.reduce((s,i)=>s+(Number(i.actualPrice)||0),0);
+                const settleTotal = ci.reduce((s,i)=>s+calcSettleAmount(i),0);
                 return (
                   <div key={card}>
                     <div className="text-xs font-bold text-indigo-700 bg-indigo-50 border-l-4 border-indigo-500 px-3 py-2 rounded-r-lg mb-2">💳 {card}</div>
                     <div className="space-y-1">
-                      {ci.map(item => (
-                        <div key={item.id} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-50">
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-gray-800 truncate">{item.productName}</div>
-                            <div className="text-gray-400">注文日: {item.orderedAt||"—"}　明細書利用日: {item.settledAt||"—"}</div>
+                      {ci.map(item => {
+                        const settleAmt = calcSettleAmount(item);
+                        return (
+                          <div key={item.id} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-50">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-gray-800 truncate">{item.productName}</div>
+                              <div className="text-gray-400">注文日: {item.orderedAt||"—"}　明細書利用日: {item.settledAt||"—"}</div>
+                            </div>
+                            <div className="font-bold text-gray-800 ml-3">
+                              ¥{settleAmt.toLocaleString()}
+                              {Number(item.actualPrice) > Number(item.instructedPrice) && <span className="text-red-500 text-xs ml-1">+¥{(Number(item.actualPrice)-Number(item.instructedPrice)).toLocaleString()}</span>}
+                            </div>
                           </div>
-                          <div className="font-bold text-gray-800 ml-3">¥{calcSettleAmount(item).toLocaleString()}{Number(item.actualPrice) > Number(item.instructedPrice) && <span className="text-red-500 text-xs ml-1">+¥{(Number(item.actualPrice)-Number(item.instructedPrice)).toLocaleString()}</span>}</div>
-                        </div>
-                      ))}
-                      <div className="flex justify-between text-xs font-bold text-indigo-700 pt-1">
-                        <span>{card} 小計</span><span>¥{ct.toLocaleString()}</span>
+                        );
+                      })}
+                      <div className="flex justify-between text-xs pt-1">
+                        <span className="font-bold text-indigo-700">{card} 小計（明細）</span>
+                        <span className="font-bold text-indigo-700">¥{ct.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-xs pb-1">
+                        <span className="font-bold text-indigo-900">{card} 小計（請求）</span>
+                        <span className="font-bold text-indigo-900">¥{settleTotal.toLocaleString()}</span>
                       </div>
                     </div>
                   </div>
