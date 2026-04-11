@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { db, auth } from "./firebase";
 import {
-  collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy
+  collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, where, getDocs, getDoc
 } from "firebase/firestore";
 import {
-  signInWithEmailAndPassword, signOut, onAuthStateChanged
+  signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword
 } from "firebase/auth";
 
 const PRINT_CSS = `@media print { .no-print { display: none !important; } }`;
@@ -32,12 +32,16 @@ const STATUS_STYLE = {
 
 export default function App() {
   const [user,        setUser]        = useState(null);
+  const [isAdmin,     setIsAdmin]     = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+  const [authMode,    setAuthMode]    = useState("login"); // "login" | "register"
   const [email,       setEmail]       = useState("");
   const [password,    setPassword]    = useState("");
   const [loginError,  setLoginError]  = useState("");
 
   const [items,       setItems]       = useState([]);
+  const [allUsers,    setAllUsers]    = useState([]); // 管理者用: 全ユーザー一覧
+  const [viewUserId,  setViewUserId]  = useState(null); // 管理者が閲覧中のユーザーID
   const [loading,     setLoading]     = useState(true);
   const [tab,         setTab]         = useState("list");
   const [filterSt,    setFilterSt]    = useState("すべて");
@@ -57,25 +61,55 @@ export default function App() {
     return () => document.head.removeChild(style);
   }, []);
 
-  // 認証状態の監視
+  // 認証状態監視
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, u => {
+    const unsub = onAuthStateChanged(auth, async u => {
       setUser(u);
+      if (u) {
+        const userDoc = await getDoc(doc(db, "users", u.uid));
+        if (userDoc.exists()) {
+          setIsAdmin(!!userDoc.data().isAdmin);
+        } else {
+          setIsAdmin(false);
+        }
+      } else {
+        setIsAdmin(false);
+      }
       setAuthLoading(false);
     });
     return unsub;
   }, []);
 
-  // Firestoreのデータ監視
+  // 管理者用: 全ユーザー一覧取得
+  useEffect(() => {
+    if (!isAdmin) return;
+    const unsub = onSnapshot(collection(db, "users"), snap => {
+      setAllUsers(snap.docs.map(d => ({ uid: d.id, ...d.data() })));
+    });
+    return unsub;
+  }, [isAdmin]);
+
+  // データ取得: 管理者は選択ユーザー or 自分、一般は自分のみ
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, "items"), orderBy("createdAt", "desc"));
+    const targetUid = (isAdmin && viewUserId) ? viewUserId : user.uid;
+    // 自分のデータ + userId未設定の既存データ（自分のものとして扱う）
+    const q = isAdmin && viewUserId
+      ? query(collection(db, "items"), where("userId", "==", targetUid), orderBy("createdAt", "desc"))
+      : query(collection(db, "items"), orderBy("createdAt", "desc"));
+
     const unsub = onSnapshot(q, snap => {
-      setItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!isAdmin || !viewUserId) {
+        // 自分のデータ = userId一致 または userId未設定（既存データ）
+        setItems(all.filter(i => i.userId === user.uid || !i.userId));
+      } else {
+        setItems(all);
+      }
       setLoading(false);
     });
     return unsub;
-  }, [user]);
+  }, [user, isAdmin, viewUserId]);
 
   const login = async () => {
     setLoginError("");
@@ -86,17 +120,34 @@ export default function App() {
     }
   };
 
-  const logout = () => signOut(auth);
-
-  const persist = async (item) => {
-    await setDoc(doc(db, "items", String(item.id)), item);
+  const register = async () => {
+    setLoginError("");
+    if (!email || !password) { setLoginError("メールアドレスとパスワードを入力してください"); return; }
+    if (password.length < 6) { setLoginError("パスワードは6文字以上にしてください"); return; }
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      // 既存ユーザーが0人なら管理者にする
+      const usersSnap = await getDocs(collection(db, "users"));
+      const isFirstUser = usersSnap.empty;
+      await setDoc(doc(db, "users", cred.user.uid), {
+        email: cred.user.email,
+        isAdmin: isFirstUser,
+        createdAt: Date.now(),
+      });
+    } catch (e) {
+      if (e.code === "auth/email-already-in-use") {
+        setLoginError("このメールアドレスはすでに登録されています");
+      } else {
+        setLoginError("登録に失敗しました: " + e.message);
+      }
+    }
   };
 
-  const persistAll = async (newItems) => {
-    setItems(newItems);
-    for (const item of newItems) {
-      await setDoc(doc(db, "items", String(item.id)), item);
-    }
+  const logout = () => { setViewUserId(null); signOut(auth); };
+
+  const persist = async (item) => {
+    const itemWithUser = { ...item, userId: user.uid };
+    await setDoc(doc(db, "items", String(item.id)), itemWithUser);
   };
 
   const showToast = (msg, err) => {
@@ -178,30 +229,43 @@ export default function App() {
   const reportTotal = reportItems.reduce((s,i)=>s+calcSettleAmount(i),0);
   const today       = new Date().toLocaleDateString("ja-JP");
 
-  // ローディング中
+  const viewingUser = viewUserId ? allUsers.find(u => u.uid === viewUserId) : null;
+  const isViewingOther = isAdmin && viewUserId && viewUserId !== user?.uid;
+
   if (authLoading) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400 text-sm">読み込み中...</div>
   );
 
-  // ログイン画面
+  // ログイン / 新規登録画面
   if (!user) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm space-y-4">
         <h1 className="text-xl font-bold text-gray-800 text-center">📦 仕入れ個人管理</h1>
+        <div className="flex rounded-xl overflow-hidden border border-gray-200">
+          <button onClick={() => { setAuthMode("login"); setLoginError(""); }}
+            className={`flex-1 py-2 text-sm font-medium transition ${authMode==="login"?"bg-indigo-600 text-white":"text-gray-500"}`}>
+            ログイン
+          </button>
+          <button onClick={() => { setAuthMode("register"); setLoginError(""); }}
+            className={`flex-1 py-2 text-sm font-medium transition ${authMode==="register"?"bg-indigo-600 text-white":"text-gray-500"}`}>
+            新規登録
+          </button>
+        </div>
         <div>
           <label className="text-sm text-gray-500">メールアドレス</label>
           <input type="email" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base"
             placeholder="メールアドレス" value={email} onChange={e => setEmail(e.target.value)} />
         </div>
         <div>
-          <label className="text-sm text-gray-500">パスワード</label>
+          <label className="text-sm text-gray-500">パスワード{authMode==="register" && <span className="text-xs text-gray-400 ml-1">（6文字以上）</span>}</label>
           <input type="password" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base"
             placeholder="パスワード" value={password} onChange={e => setPassword(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && login()} />
+            onKeyDown={e => e.key === "Enter" && (authMode==="login" ? login() : register())} />
         </div>
         {loginError && <p className="text-sm text-red-500">{loginError}</p>}
-        <button onClick={login} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold text-base">
-          ログイン
+        <button onClick={authMode==="login" ? login : register}
+          className="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold text-base">
+          {authMode==="login" ? "ログイン" : "アカウント作成"}
         </button>
       </div>
     </div>
@@ -223,23 +287,31 @@ export default function App() {
         {CARDS.map(card => {
           const ci = reportItems.filter(i => i.cardType === card);
           if (ci.length === 0) return null;
-          // 明細金額小計
           const ct = ci.reduce((s,i)=>s+(Number(i.actualPrice)||0),0);
-          // 請求金額小計（指示超過分は指示金額で精算）
           const settleTotal = ci.reduce((s,i)=>s+calcSettleAmount(i),0);
           return (
             <div key={card}>
               <div className="text-sm font-bold text-indigo-700 bg-indigo-50 border-l-4 border-indigo-500 px-3 py-2 rounded-r-lg mb-2">💳 {card}</div>
-              <table className="w-full text-sm border-collapse">
+              <table className="w-full text-sm border-collapse table-fixed">
+                <colgroup>
+                  <col style={{width:"22%"}} />
+                  <col style={{width:"10%"}} />
+                  <col style={{width:"10%"}} />
+                  <col style={{width:"10%"}} />
+                  <col style={{width:"10%"}} />
+                  <col style={{width:"8%"}} />
+                  <col style={{width:"10%"}} />
+                  <col style={{width:"20%"}} />
+                </colgroup>
                 <thead>
                   <tr className="bg-gray-50 text-xs text-gray-500">
                     <th className="text-left px-3 py-2 border-b border-gray-200">商品名</th>
-                    <th className="text-left px-3 py-2 border-b border-gray-200 whitespace-nowrap">注文日</th>
-                    <th className="text-left px-3 py-2 border-b border-gray-200 whitespace-nowrap">明細書利用日</th>
-                    <th className="text-right px-3 py-2 border-b border-gray-200 whitespace-nowrap">指示金額</th>
-                    <th className="text-right px-3 py-2 border-b border-gray-200 whitespace-nowrap">明細金額</th>
-                    <th className="text-right px-3 py-2 border-b border-gray-200 whitespace-nowrap">差分</th>
-                    <th className="text-right px-3 py-2 border-b border-gray-200 whitespace-nowrap">請求金額</th>
+                    <th className="text-left px-3 py-2 border-b border-gray-200">注文日</th>
+                    <th className="text-left px-3 py-2 border-b border-gray-200">明細書利用日</th>
+                    <th className="text-right px-3 py-2 border-b border-gray-200">指示金額</th>
+                    <th className="text-right px-3 py-2 border-b border-gray-200">明細金額</th>
+                    <th className="text-right px-3 py-2 border-b border-gray-200">差分</th>
+                    <th className="text-right px-3 py-2 border-b border-gray-200">請求金額</th>
                     <th className="text-left px-3 py-2 border-b border-gray-200">注文番号</th>
                   </tr>
                 </thead>
@@ -249,9 +321,9 @@ export default function App() {
                     const settleAmt = calcSettleAmount(item);
                     return (
                       <tr key={item.id} className="border-b border-gray-100">
-                        <td className="px-3 py-2 font-medium text-gray-800">{item.productName}</td>
-                        <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{item.orderedAt || "—"}</td>
-                        <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{item.settledAt || "—"}</td>
+                        <td className="px-3 py-2 font-medium text-gray-800 break-words">{item.productName}</td>
+                        <td className="px-3 py-2 text-gray-500 text-xs">{item.orderedAt || "—"}</td>
+                        <td className="px-3 py-2 text-gray-500 text-xs">{item.settledAt || "—"}</td>
                         <td className="px-3 py-2 text-right text-gray-500">¥{Number(item.instructedPrice).toLocaleString()}</td>
                         <td className="px-3 py-2 text-right font-bold text-gray-800">¥{Number(item.actualPrice).toLocaleString()}</td>
                         <td className="px-3 py-2 text-right">
@@ -260,7 +332,7 @@ export default function App() {
                             : <span className="text-gray-300">—</span>}
                         </td>
                         <td className="px-3 py-2 text-right font-bold text-gray-800">¥{settleAmt.toLocaleString()}</td>
-                        <td className="px-3 py-2 text-gray-400 font-mono text-xs">{item.orderNo || "—"}</td>
+                        <td className="px-3 py-2 text-gray-400 font-mono text-xs break-all">{item.orderNo || "—"}</td>
                       </tr>
                     );
                   })}
@@ -291,9 +363,34 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
-      <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-30 flex items-center justify-between">
-        <h1 className="text-lg font-bold text-gray-800">📦 仕入れ個人管理</h1>
-        <button onClick={logout} className="text-xs text-gray-400 border border-gray-200 px-3 py-1.5 rounded-lg">ログアウト</button>
+      {/* ヘッダー */}
+      <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-30">
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-bold text-gray-800">📦 仕入れ個人管理</h1>
+          <div className="flex items-center gap-2">
+            {isAdmin && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">管理者</span>}
+            <button onClick={logout} className="text-xs text-gray-400 border border-gray-200 px-3 py-1.5 rounded-lg">ログアウト</button>
+          </div>
+        </div>
+        {/* 管理者: ユーザー切り替え */}
+        {isAdmin && (
+          <div className="mt-2 flex items-center gap-2">
+            <label className="text-xs text-gray-500 whitespace-nowrap">閲覧ユーザー:</label>
+            <select className="flex-1 border border-gray-200 rounded-lg px-2 py-1 text-xs"
+              value={viewUserId || user.uid}
+              onChange={e => setViewUserId(e.target.value === user.uid ? null : e.target.value)}>
+              <option value={user.uid}>自分（{user.email}）</option>
+              {allUsers.filter(u => u.uid !== user?.uid).map(u => (
+                <option key={u.uid} value={u.uid}>{u.email}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {isViewingOther && (
+          <div className="mt-1 text-xs text-orange-500 bg-orange-50 rounded px-2 py-1">
+            👁 {viewingUser?.email} のデータを閲覧中（読み取り専用）
+          </div>
+        )}
       </div>
 
       <div className="bg-white border-b border-gray-200 flex sticky top-14 z-20">
@@ -360,6 +457,7 @@ export default function App() {
         {/* 明細照合 */}
         {tab === "check" && (
           <div className="space-y-3">
+            {isViewingOther && <div className="text-xs text-orange-500 bg-orange-50 rounded-xl px-4 py-3">👁 閲覧専用モードです</div>}
             <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-700">
               💳 クレカ明細（PDF）を別で開きながら、各案件に<strong>利用日・金額</strong>を入力して照合してください。
             </div>
@@ -387,30 +485,34 @@ export default function App() {
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full font-medium flex-shrink-0 ${STATUS_STYLE[item.status]}`}>{item.status}</span>
                   </div>
-                  <div className="bg-gray-50 rounded-lg p-3 space-y-2">
-                    <div className="text-xs font-medium text-gray-500">📄 明細から入力</div>
-                    <div className="flex gap-2">
-                      <div className="flex-1">
-                        <label className="text-xs text-gray-400">利用日</label>
-                        <input type="date" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 mt-0.5 text-sm bg-white"
-                          value={inp.usedAt} onChange={e => setCI(item.id,"usedAt",e.target.value)} />
+                  {!isViewingOther && (
+                    <>
+                      <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                        <div className="text-xs font-medium text-gray-500">📄 明細から入力</div>
+                        <div className="flex gap-2">
+                          <div className="flex-1">
+                            <label className="text-xs text-gray-400">利用日</label>
+                            <input type="date" className="w-full border border-gray-200 rounded-lg px-2 py-1 mt-0.5 text-sm bg-white h-9"
+                              value={inp.usedAt} onChange={e => setCI(item.id,"usedAt",e.target.value)} />
+                          </div>
+                          <div className="flex-1">
+                            <label className="text-xs text-gray-400">金額（円）</label>
+                            <input inputMode="numeric" pattern="[0-9]*" className="w-full border border-gray-200 rounded-lg px-2 py-1 mt-0.5 text-sm bg-white h-9"
+                              placeholder="3280" value={inp.usedAmount} onChange={e => setCI(item.id,"usedAmount",e.target.value)} />
+                          </div>
+                        </div>
+                        {diff !== null && (
+                          <p className={`text-xs ${diff===0?"text-green-500":diff>0?"text-red-500":"text-green-500"}`}>
+                            {diff===0?"✓ 指示金額と一致":diff>0?`⚠ 指示より ¥${diff.toLocaleString()} 高い`:`✓ 指示より ¥${Math.abs(diff).toLocaleString()} 安い`}
+                          </p>
+                        )}
                       </div>
-                      <div className="flex-1">
-                        <label className="text-xs text-gray-400">金額（円）</label>
-                        <input inputMode="numeric" pattern="[0-9]*" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 mt-0.5 text-sm bg-white"
-                          placeholder="3280" value={inp.usedAmount} onChange={e => setCI(item.id,"usedAmount",e.target.value)} />
-                      </div>
-                    </div>
-                    {diff !== null && (
-                      <p className={`text-xs ${diff===0?"text-green-500":diff>0?"text-red-500":"text-green-500"}`}>
-                        {diff===0?"✓ 指示金額と一致":diff>0?`⚠ 指示より ¥${diff.toLocaleString()} 高い`:`✓ 指示より ¥${Math.abs(diff).toLocaleString()} 安い`}
-                      </p>
-                    )}
-                  </div>
-                  <button onClick={() => handleCheck(item)}
-                    className="w-full bg-yellow-500 text-white py-2 rounded-lg text-sm font-semibold hover:bg-yellow-600 transition">
-                    照合済にする
-                  </button>
+                      <button onClick={() => handleCheck(item)}
+                        className="w-full bg-yellow-500 text-white py-2 rounded-lg text-sm font-semibold hover:bg-yellow-600 transition">
+                        照合済にする
+                      </button>
+                    </>
+                  )}
                 </div>
               );
             })}
@@ -557,10 +659,13 @@ export default function App() {
         )}
       </div>
 
-      <button onClick={openNew}
-        className="fixed bottom-8 right-5 bg-indigo-600 text-white rounded-full w-16 h-16 text-3xl shadow-xl hover:bg-indigo-700 transition flex items-center justify-center z-30">
-        ＋
-      </button>
+      {/* 新規登録ボタン（閲覧専用時は非表示） */}
+      {!isViewingOther && (
+        <button onClick={openNew}
+          className="fixed bottom-8 right-5 bg-indigo-600 text-white rounded-full w-16 h-16 text-3xl shadow-xl hover:bg-indigo-700 transition flex items-center justify-center z-30">
+          ＋
+        </button>
+      )}
 
       {/* 入力モーダル */}
       {showForm && (
@@ -571,37 +676,37 @@ export default function App() {
                 <h2 className="font-bold text-gray-800 text-lg">{editId?"案件を編集":"新規登録"}</h2>
                 <button onClick={() => setShowForm(false)} className="text-gray-400 text-2xl leading-none w-10 h-10 flex items-center justify-center">✕</button>
               </div>
-              <div className="p-5 space-y-5">
-                <div className="space-y-3">
+              <div className="p-5 space-y-4">
+                <div className="space-y-2">
                   <div className="text-xs font-bold text-indigo-600">📋 購入情報</div>
-                  <div><label className="text-sm text-gray-500">購入サイト</label>
-                    <select className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.site} onChange={e=>ff({site:e.target.value})}>
+                  <div><label className="text-xs text-gray-500">購入サイト</label>
+                    <select className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base" value={form.site} onChange={e=>ff({site:e.target.value})}>
                       {SITES.map(s=><option key={s}>{s}</option>)}
                     </select>
                   </div>
-                  <div><label className="text-sm text-gray-500">商品名 *</label>
-                    <input className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" placeholder="商品名" value={form.productName||""} onChange={e=>ff({productName:e.target.value})} />
+                  <div><label className="text-xs text-gray-500">商品名 *</label>
+                    <input className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base" placeholder="商品名" value={form.productName||""} onChange={e=>ff({productName:e.target.value})} />
                   </div>
-                  <div><label className="text-sm text-gray-500">指示金額（円）*</label>
-                    <input inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" placeholder="3280" value={form.instructedPrice||""} onChange={e=>ff({instructedPrice:e.target.value})} />
+                  <div><label className="text-xs text-gray-500">指示金額（円）*</label>
+                    <input inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base" placeholder="3280" value={form.instructedPrice||""} onChange={e=>ff({instructedPrice:e.target.value})} />
                   </div>
                   <div className="flex items-center gap-3">
                     <input type="checkbox" id="pa" checked={!!form.pointAdjust} onChange={e=>ff({pointAdjust:e.target.checked})} className="w-5 h-5" />
                     <label htmlFor="pa" className="text-base text-gray-600">ポイント調整要</label>
                   </div>
-                  <div><label className="text-sm text-gray-500">備考</label>
-                    <input className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" placeholder="備考（任意）" value={form.note||""} onChange={e=>ff({note:e.target.value})} />
+                  <div><label className="text-xs text-gray-500">備考</label>
+                    <input className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base" placeholder="備考（任意）" value={form.note||""} onChange={e=>ff({note:e.target.value})} />
                   </div>
                 </div>
                 <div className="border-t border-gray-100"/>
-                <div className="space-y-3">
+                <div className="space-y-2">
                   <div className="text-xs font-bold text-blue-600">🛒 購入報告</div>
-                  <div className="flex flex-col gap-3">
-                    <div className="flex-1"><label className="text-sm text-gray-500">注文日</label>
-                      <input type="date" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.orderedAt||""} onChange={e=>ff({orderedAt:e.target.value})} />
+                  <div className="flex flex-col gap-2">
+                    <div className="flex-1"><label className="text-xs text-gray-500">注文日</label>
+                      <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base h-11" value={form.orderedAt||""} onChange={e=>ff({orderedAt:e.target.value})} />
                     </div>
-                    <div className="flex-1"><label className="text-sm text-gray-500">購入金額（円）</label>
-                      <input inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" placeholder="実購入額" value={form.actualPrice||""} onChange={e=>ff({actualPrice:e.target.value})} />
+                    <div className="flex-1"><label className="text-xs text-gray-500">購入金額（円）</label>
+                      <input inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base h-11" placeholder="実購入額" value={form.actualPrice||""} onChange={e=>ff({actualPrice:e.target.value})} />
                     </div>
                   </div>
                   {form.actualPrice && form.instructedPrice && (()=>{
@@ -609,25 +714,25 @@ export default function App() {
                     if(d===0)return null;
                     return <p className={`text-sm ${d>0?"text-red-500":"text-green-500"}`}>{d>0?`⚠ 指示より ¥${d.toLocaleString()} 高い（自己負担）`:`✓ 指示より ¥${Math.abs(d).toLocaleString()} 安い`}</p>;
                   })()}
-                  <div><label className="text-sm text-gray-500">注文番号</label>
-                    <input className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base font-mono" placeholder="例: 123-4567890-1234567" value={form.orderNo||""} onChange={e=>ff({orderNo:e.target.value})} />
+                  <div><label className="text-xs text-gray-500">注文番号</label>
+                    <input className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base h-11 font-mono" placeholder="例: 123-4567890-1234567" value={form.orderNo||""} onChange={e=>ff({orderNo:e.target.value})} />
                   </div>
                 </div>
                 <div className="border-t border-gray-100"/>
-                <div className="space-y-3">
+                <div className="space-y-2">
                   <div className="text-xs font-bold text-yellow-600">🧾 明細照合</div>
-                  <div className="flex flex-col gap-3">
-                    <div className="flex-1"><label className="text-sm text-gray-500">クレカ</label>
-                      <select className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.cardType||"楽天カード"} onChange={e=>ff({cardType:e.target.value})}>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex-1"><label className="text-xs text-gray-500">クレカ</label>
+                      <select className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base" value={form.cardType||"楽天カード"} onChange={e=>ff({cardType:e.target.value})}>
                         {CARDS.map(c=><option key={c}>{c}</option>)}
                       </select>
                     </div>
-                    <div className="flex-1"><label className="text-sm text-gray-500">決済日</label>
-                      <input type="date" className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.settledAt||""} onChange={e=>ff({settledAt:e.target.value})} />
+                    <div className="flex-1"><label className="text-xs text-gray-500">決済日</label>
+                      <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base h-11" value={form.settledAt||""} onChange={e=>ff({settledAt:e.target.value})} />
                     </div>
                   </div>
-                  <div><label className="text-sm text-gray-500">精算月</label>
-                    <select className="w-full border border-gray-200 rounded-xl px-4 py-3 mt-1 text-base" value={form.settleMonth||THIS_MONTH} onChange={e=>ff({settleMonth:e.target.value})}>
+                  <div><label className="text-xs text-gray-500">精算月</label>
+                    <select className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base" value={form.settleMonth||THIS_MONTH} onChange={e=>ff({settleMonth:e.target.value})}>
                       {MONTHS.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}
                     </select>
                   </div>
@@ -635,26 +740,26 @@ export default function App() {
                 <div className="border-t border-gray-100"/>
                 <div>
                   <div className="text-xs font-bold text-gray-500 mb-2">📌 ステータス</div>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-3 gap-2">
                     {Object.entries(STATUS_STYLE).map(([st,cls])=>(
                       <button key={st} onClick={()=>ff({status:st})}
-                        className={`py-3 rounded-xl text-sm font-medium border-2 transition ${form.status===st?"border-indigo-500 "+cls:"border-gray-200 text-gray-400"}`}>
+                        className={`py-2.5 rounded-xl text-sm font-medium border-2 transition ${form.status===st?"border-indigo-500 "+cls:"border-gray-200 text-gray-400"}`}>
                         {st}
                       </button>
                     ))}
                   </div>
                 </div>
-                <div className="flex gap-3 pt-2 pb-4">
-                  {editId && <button onClick={()=>deleteItem(editId)} className="px-5 py-3 text-base text-red-400 border border-red-200 rounded-xl">削除</button>}
+                <div className="flex gap-3 pt-1 pb-4">
+                  {editId && <button onClick={()=>deleteItem(editId)} className="px-4 py-2.5 text-sm text-red-400 border border-red-200 rounded-xl">削除</button>}
                   {editId && <button onClick={async ()=>{
                     const src = items.find(i=>i.id===editId);
                     const duped = {...src, id:Date.now(), createdAt:Date.now(), status:"購入済", orderedAt:"", actualPrice:"", orderNo:"", settledAt:""};
                     await persist(duped);
                     setShowForm(false);
                     showToast("複製しました");
-                  }} className="px-5 py-3 text-base text-indigo-500 border border-indigo-200 rounded-xl">複製</button>}
-                  <button onClick={()=>setShowForm(false)} className="flex-1 border border-gray-200 text-gray-600 py-3 rounded-xl text-base">キャンセル</button>
-                  <button onClick={saveForm} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl text-base font-semibold">保存する</button>
+                  }} className="px-4 py-2.5 text-sm text-indigo-500 border border-indigo-200 rounded-xl">複製</button>}
+                  <button onClick={()=>setShowForm(false)} className="flex-1 border border-gray-200 text-gray-600 py-2.5 rounded-xl text-base">キャンセル</button>
+                  <button onClick={saveForm} className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl text-base font-semibold">保存する</button>
                 </div>
               </div>
             </div>
