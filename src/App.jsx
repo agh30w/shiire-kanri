@@ -41,7 +41,6 @@ export default function App() {
 
   const [items,       setItems]       = useState([]);
   const [allUsers,    setAllUsers]    = useState([]);
-  const [viewUserId,  setViewUserId]  = useState(null);
   const [adminItems,  setAdminItems]  = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [tab,         setTab]         = useState("list");
@@ -55,6 +54,7 @@ export default function App() {
   const [dupAlert,    setDupAlert]    = useState(null);
   const [printMode,   setPrintMode]   = useState(false);
   const [adminMonth,  setAdminMonth]  = useState(THIS_MONTH);
+  const [viewUserId,  setViewUserId]  = useState(null); // 管理画面で選択中のユーザー
 
   useEffect(() => {
     const style = document.createElement("style");
@@ -89,22 +89,29 @@ export default function App() {
     return unsub;
   }, [isAdmin]);
 
-  // 自分のデータ取得
+  // 自分のデータ取得（管理者も自分のデータはuserIdで厳密に絞る）
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, "items"), orderBy("createdAt", "desc"));
+    const q = query(
+      collection(db, "items"),
+      where("userId", "==", user.uid),
+      orderBy("createdAt", "desc")
+    );
     const unsub = onSnapshot(q, snap => {
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setItems(all.filter(i => i.userId === user.uid || !i.userId));
+      setItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       setLoading(false);
     });
     return unsub;
   }, [user]);
 
-  // 管理者: 選択ユーザーのデータ取得
+  // 管理画面: 選択ユーザーのデータ取得
   useEffect(() => {
     if (!isAdmin || !viewUserId) { setAdminItems([]); return; }
-    const q = query(collection(db, "items"), where("userId", "==", viewUserId), orderBy("createdAt", "desc"));
+    const q = query(
+      collection(db, "items"),
+      where("userId", "==", viewUserId),
+      orderBy("createdAt", "desc")
+    );
     const unsub = onSnapshot(q, snap => {
       setAdminItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
@@ -377,7 +384,10 @@ export default function App() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold text-gray-800">📦 仕入れ個人管理</h1>
-            <div className="text-xs text-gray-400 mt-0.5">{user.email}{isAdmin && <span className="ml-2 bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full font-medium">管理者</span>}</div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {user.email}
+              {isAdmin && <span className="ml-2 bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full font-medium">管理者</span>}
+            </div>
           </div>
           <button onClick={logout} className="text-xs text-gray-400 border border-gray-200 px-3 py-1.5 rounded-lg">ログアウト</button>
         </div>
@@ -682,7 +692,6 @@ export default function App() {
                   </select>
                 </div>
 
-                {/* ステータス集計 */}
                 <div className="grid grid-cols-3 gap-2">
                   {Object.entries(adminCounts).map(([st, n]) => (
                     <div key={st} className="bg-white rounded-xl border border-gray-200 p-3 text-center">
@@ -692,13 +701,11 @@ export default function App() {
                   ))}
                 </div>
 
-                {/* 月次合計 */}
                 <div className="bg-indigo-600 rounded-xl p-4 text-white">
                   <div className="text-sm opacity-80 mb-1">{MONTHS.find(m=>m.value===adminMonth)?.label} 建て替え合計</div>
                   <div className="text-3xl font-bold">¥{adminMonthTotal.toLocaleString()}</div>
                 </div>
 
-                {/* 案件一覧 */}
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-100 font-semibold text-sm text-gray-700">
                     {MONTHS.find(m=>m.value===adminMonth)?.label} の案件 ({adminMonthItems.length}件)
