@@ -34,14 +34,15 @@ export default function App() {
   const [user,        setUser]        = useState(null);
   const [isAdmin,     setIsAdmin]     = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
-  const [authMode,    setAuthMode]    = useState("login"); // "login" | "register"
+  const [authMode,    setAuthMode]    = useState("login");
   const [email,       setEmail]       = useState("");
   const [password,    setPassword]    = useState("");
   const [loginError,  setLoginError]  = useState("");
 
   const [items,       setItems]       = useState([]);
-  const [allUsers,    setAllUsers]    = useState([]); // 管理者用: 全ユーザー一覧
-  const [viewUserId,  setViewUserId]  = useState(null); // 管理者が閲覧中のユーザーID
+  const [allUsers,    setAllUsers]    = useState([]);
+  const [viewUserId,  setViewUserId]  = useState(null);
+  const [adminItems,  setAdminItems]  = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [tab,         setTab]         = useState("list");
   const [filterSt,    setFilterSt]    = useState("すべて");
@@ -53,6 +54,7 @@ export default function App() {
   const [checkInputs, setCheckInputs] = useState({});
   const [dupAlert,    setDupAlert]    = useState(null);
   const [printMode,   setPrintMode]   = useState(false);
+  const [adminMonth,  setAdminMonth]  = useState(THIS_MONTH);
 
   useEffect(() => {
     const style = document.createElement("style");
@@ -61,7 +63,6 @@ export default function App() {
     return () => document.head.removeChild(style);
   }, []);
 
-  // 認証状態監視
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async u => {
       setUser(u);
@@ -80,7 +81,6 @@ export default function App() {
     return unsub;
   }, []);
 
-  // 管理者用: 全ユーザー一覧取得
   useEffect(() => {
     if (!isAdmin) return;
     const unsub = onSnapshot(collection(db, "users"), snap => {
@@ -89,27 +89,27 @@ export default function App() {
     return unsub;
   }, [isAdmin]);
 
-  // データ取得: 管理者は選択ユーザー or 自分、一般は自分のみ
+  // 自分のデータ取得
   useEffect(() => {
     if (!user) return;
-    const targetUid = (isAdmin && viewUserId) ? viewUserId : user.uid;
-    // 自分のデータ + userId未設定の既存データ（自分のものとして扱う）
-    const q = isAdmin && viewUserId
-      ? query(collection(db, "items"), where("userId", "==", targetUid), orderBy("createdAt", "desc"))
-      : query(collection(db, "items"), orderBy("createdAt", "desc"));
-
+    const q = query(collection(db, "items"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, snap => {
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (!isAdmin || !viewUserId) {
-        // 自分のデータ = userId一致 または userId未設定（既存データ）
-        setItems(all.filter(i => i.userId === user.uid || !i.userId));
-      } else {
-        setItems(all);
-      }
+      setItems(all.filter(i => i.userId === user.uid || !i.userId));
       setLoading(false);
     });
     return unsub;
-  }, [user, isAdmin, viewUserId]);
+  }, [user]);
+
+  // 管理者: 選択ユーザーのデータ取得
+  useEffect(() => {
+    if (!isAdmin || !viewUserId) { setAdminItems([]); return; }
+    const q = query(collection(db, "items"), where("userId", "==", viewUserId), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, snap => {
+      setAdminItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return unsub;
+  }, [isAdmin, viewUserId]);
 
   const login = async () => {
     setLoginError("");
@@ -126,7 +126,6 @@ export default function App() {
     if (password.length < 6) { setLoginError("パスワードは6文字以上にしてください"); return; }
     try {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
-      // 既存ユーザーが0人なら管理者にする
       const usersSnap = await getDocs(collection(db, "users"));
       const isFirstUser = usersSnap.empty;
       await setDoc(doc(db, "users", cred.user.uid), {
@@ -229,14 +228,25 @@ export default function App() {
   const reportTotal = reportItems.reduce((s,i)=>s+calcSettleAmount(i),0);
   const today       = new Date().toLocaleDateString("ja-JP");
 
-  const viewingUser = viewUserId ? allUsers.find(u => u.uid === viewUserId) : null;
-  const isViewingOther = isAdmin && viewUserId && viewUserId !== user?.uid;
+  // 管理画面用集計
+  const adminMonthItems = adminItems.filter(i => i.settleMonth === adminMonth);
+  const adminMonthTotal = adminMonthItems.reduce((s,i) => s+(Number(i.actualPrice)||0), 0);
+  const adminCounts = { 購入済:0, 照合済:0, 精算済:0 };
+  adminItems.forEach(i => { if (adminCounts[i.status] !== undefined) adminCounts[i.status]++; });
+  const viewingUserEmail = allUsers.find(u => u.uid === viewUserId)?.email || "";
+
+  const TABS = [
+    {id:"list", label:"案件一覧"},
+    {id:"check", label:"明細照合"},
+    {id:"monthly", label:"月次集計"},
+    {id:"report", label:"報告書"},
+    ...(isAdmin ? [{id:"admin", label:"管理"}] : []),
+  ];
 
   if (authLoading) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400 text-sm">読み込み中...</div>
   );
 
-  // ログイン / 新規登録画面
   if (!user) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm space-y-4">
@@ -271,7 +281,6 @@ export default function App() {
     </div>
   );
 
-  // 印刷モード
   if (printMode) return (
     <div className="min-h-screen bg-white p-6 max-w-4xl mx-auto">
       <div className="no-print flex items-center justify-between mb-6">
@@ -366,37 +375,18 @@ export default function App() {
       {/* ヘッダー */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-30">
         <div className="flex items-center justify-between">
-          <h1 className="text-lg font-bold text-gray-800">📦 仕入れ個人管理</h1>
-          <div className="flex items-center gap-2">
-            {isAdmin && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">管理者</span>}
-            <button onClick={logout} className="text-xs text-gray-400 border border-gray-200 px-3 py-1.5 rounded-lg">ログアウト</button>
+          <div>
+            <h1 className="text-lg font-bold text-gray-800">📦 仕入れ個人管理</h1>
+            <div className="text-xs text-gray-400 mt-0.5">{user.email}{isAdmin && <span className="ml-2 bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full font-medium">管理者</span>}</div>
           </div>
+          <button onClick={logout} className="text-xs text-gray-400 border border-gray-200 px-3 py-1.5 rounded-lg">ログアウト</button>
         </div>
-        {/* 管理者: ユーザー切り替え */}
-        {isAdmin && (
-          <div className="mt-2 flex items-center gap-2">
-            <label className="text-xs text-gray-500 whitespace-nowrap">閲覧ユーザー:</label>
-            <select className="flex-1 border border-gray-200 rounded-lg px-2 py-1 text-xs"
-              value={viewUserId || user.uid}
-              onChange={e => setViewUserId(e.target.value === user.uid ? null : e.target.value)}>
-              <option value={user.uid}>自分（{user.email}）</option>
-              {allUsers.filter(u => u.uid !== user?.uid).map(u => (
-                <option key={u.uid} value={u.uid}>{u.email}</option>
-              ))}
-            </select>
-          </div>
-        )}
-        {isViewingOther && (
-          <div className="mt-1 text-xs text-orange-500 bg-orange-50 rounded px-2 py-1">
-            👁 {viewingUser?.email} のデータを閲覧中（読み取り専用）
-          </div>
-        )}
       </div>
 
-      <div className="bg-white border-b border-gray-200 flex sticky top-14 z-20">
-        {[{id:"list",label:"案件一覧"},{id:"check",label:"明細照合"},{id:"monthly",label:"月次集計"},{id:"report",label:"報告書"}].map(t => (
+      <div className="bg-white border-b border-gray-200 flex sticky top-14 z-20 overflow-x-auto">
+        {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`flex-1 py-4 text-base font-medium border-b-2 transition ${tab===t.id?"border-indigo-600 text-indigo-600":"border-transparent text-gray-400"}`}>
+            className={`flex-1 py-4 text-sm font-medium border-b-2 transition whitespace-nowrap px-2 ${tab===t.id?"border-indigo-600 text-indigo-600":"border-transparent text-gray-400"}`}>
             {t.label}
           </button>
         ))}
@@ -457,7 +447,6 @@ export default function App() {
         {/* 明細照合 */}
         {tab === "check" && (
           <div className="space-y-3">
-            {isViewingOther && <div className="text-xs text-orange-500 bg-orange-50 rounded-xl px-4 py-3">👁 閲覧専用モードです</div>}
             <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-700">
               💳 クレカ明細（PDF）を別で開きながら、各案件に<strong>利用日・金額</strong>を入力して照合してください。
             </div>
@@ -485,34 +474,30 @@ export default function App() {
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full font-medium flex-shrink-0 ${STATUS_STYLE[item.status]}`}>{item.status}</span>
                   </div>
-                  {!isViewingOther && (
-                    <>
-                      <div className="bg-gray-50 rounded-lg p-3 space-y-2">
-                        <div className="text-xs font-medium text-gray-500">📄 明細から入力</div>
-                        <div className="flex gap-2">
-                          <div className="flex-1">
-                            <label className="text-xs text-gray-400">利用日</label>
-                            <input type="date" className="w-full border border-gray-200 rounded-lg px-2 py-1 mt-0.5 text-sm bg-white h-9"
-                              value={inp.usedAt} onChange={e => setCI(item.id,"usedAt",e.target.value)} />
-                          </div>
-                          <div className="flex-1">
-                            <label className="text-xs text-gray-400">金額（円）</label>
-                            <input inputMode="numeric" pattern="[0-9]*" className="w-full border border-gray-200 rounded-lg px-2 py-1 mt-0.5 text-sm bg-white h-9"
-                              placeholder="3280" value={inp.usedAmount} onChange={e => setCI(item.id,"usedAmount",e.target.value)} />
-                          </div>
-                        </div>
-                        {diff !== null && (
-                          <p className={`text-xs ${diff===0?"text-green-500":diff>0?"text-red-500":"text-green-500"}`}>
-                            {diff===0?"✓ 指示金額と一致":diff>0?`⚠ 指示より ¥${diff.toLocaleString()} 高い`:`✓ 指示より ¥${Math.abs(diff).toLocaleString()} 安い`}
-                          </p>
-                        )}
+                  <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                    <div className="text-xs font-medium text-gray-500">📄 明細から入力</div>
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <label className="text-xs text-gray-400">利用日</label>
+                        <input type="date" className="w-full border border-gray-200 rounded-lg px-2 py-1 mt-0.5 text-sm bg-white h-9"
+                          value={inp.usedAt} onChange={e => setCI(item.id,"usedAt",e.target.value)} />
                       </div>
-                      <button onClick={() => handleCheck(item)}
-                        className="w-full bg-yellow-500 text-white py-2 rounded-lg text-sm font-semibold hover:bg-yellow-600 transition">
-                        照合済にする
-                      </button>
-                    </>
-                  )}
+                      <div className="flex-1">
+                        <label className="text-xs text-gray-400">金額（円）</label>
+                        <input inputMode="numeric" pattern="[0-9]*" className="w-full border border-gray-200 rounded-lg px-2 py-1 mt-0.5 text-sm bg-white h-9"
+                          placeholder="3280" value={inp.usedAmount} onChange={e => setCI(item.id,"usedAmount",e.target.value)} />
+                      </div>
+                    </div>
+                    {diff !== null && (
+                      <p className={`text-xs ${diff===0?"text-green-500":diff>0?"text-red-500":"text-green-500"}`}>
+                        {diff===0?"✓ 指示金額と一致":diff>0?`⚠ 指示より ¥${diff.toLocaleString()} 高い`:`✓ 指示より ¥${Math.abs(diff).toLocaleString()} 安い`}
+                      </p>
+                    )}
+                  </div>
+                  <button onClick={() => handleCheck(item)}
+                    className="w-full bg-yellow-500 text-white py-2 rounded-lg text-sm font-semibold hover:bg-yellow-600 transition">
+                    照合済にする
+                  </button>
                 </div>
               );
             })}
@@ -657,15 +642,97 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* 管理画面 */}
+        {tab === "admin" && isAdmin && (
+          <div className="space-y-4">
+            <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3 text-sm text-indigo-700 font-medium">
+              👑 管理者画面 — ユーザーのデータを閲覧できます
+            </div>
+
+            {/* ユーザー一覧 */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100 font-semibold text-sm text-gray-700">ユーザー一覧 ({allUsers.length}人)</div>
+              {allUsers.map(u => (
+                <div key={u.uid}
+                  onClick={() => setViewUserId(viewUserId === u.uid ? null : u.uid)}
+                  className={`px-4 py-3 border-b border-gray-50 last:border-0 cursor-pointer flex items-center justify-between ${viewUserId===u.uid?"bg-indigo-50":""}`}>
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">{u.email}</div>
+                    <div className="text-xs text-gray-400">{u.uid}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {u.isAdmin && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">管理者</span>}
+                    {viewUserId===u.uid
+                      ? <span className="text-xs bg-indigo-600 text-white px-2 py-1 rounded-lg">閲覧中</span>
+                      : <span className="text-xs text-gray-400 border border-gray-200 px-2 py-1 rounded-lg">閲覧する</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* 選択ユーザーのデータ */}
+            {viewUserId && (
+              <div className="space-y-3">
+                <div className="bg-white rounded-xl border border-gray-200 p-3">
+                  <div className="text-xs text-gray-500 mb-1">閲覧中: <span className="font-medium text-gray-700">{viewingUserEmail}</span></div>
+                  <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                    value={adminMonth} onChange={e => setAdminMonth(e.target.value)}>
+                    {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  </select>
+                </div>
+
+                {/* ステータス集計 */}
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.entries(adminCounts).map(([st, n]) => (
+                    <div key={st} className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+                      <div className="text-2xl font-bold text-gray-700">{n}</div>
+                      <div className="text-xs text-gray-400 mt-0.5">{st}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 月次合計 */}
+                <div className="bg-indigo-600 rounded-xl p-4 text-white">
+                  <div className="text-sm opacity-80 mb-1">{MONTHS.find(m=>m.value===adminMonth)?.label} 建て替え合計</div>
+                  <div className="text-3xl font-bold">¥{adminMonthTotal.toLocaleString()}</div>
+                </div>
+
+                {/* 案件一覧 */}
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-100 font-semibold text-sm text-gray-700">
+                    {MONTHS.find(m=>m.value===adminMonth)?.label} の案件 ({adminMonthItems.length}件)
+                  </div>
+                  {adminMonthItems.length===0 && <div className="px-4 py-6 text-center text-sm text-gray-400">該当する案件がありません</div>}
+                  {adminMonthItems.map(item => {
+                    const diff = Number(item.actualPrice) - Number(item.instructedPrice);
+                    return (
+                      <div key={item.id} className="px-4 py-3 border-b border-gray-50 last:border-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-gray-800 truncate">{item.productName}</div>
+                            <div className="text-xs text-gray-400 mt-0.5">
+                              {item.cardType}　指示: ¥{Number(item.instructedPrice).toLocaleString()}
+                              {item.actualPrice && <span className={`ml-2 font-medium ${diff>0?"text-red-500":diff<0?"text-green-500":"text-gray-600"}`}>実績: ¥{Number(item.actualPrice).toLocaleString()}</span>}
+                            </div>
+                            {item.orderedAt && <div className="text-xs text-gray-400">注文日: {item.orderedAt}{item.settledAt && `　利用日: ${item.settledAt}`}</div>}
+                          </div>
+                          <span className={`text-xs px-2 py-1 rounded-full font-medium flex-shrink-0 ${STATUS_STYLE[item.status]}`}>{item.status}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* 新規登録ボタン（閲覧専用時は非表示） */}
-      {!isViewingOther && (
-        <button onClick={openNew}
-          className="fixed bottom-8 right-5 bg-indigo-600 text-white rounded-full w-16 h-16 text-3xl shadow-xl hover:bg-indigo-700 transition flex items-center justify-center z-30">
-          ＋
-        </button>
-      )}
+      <button onClick={openNew}
+        className="fixed bottom-8 right-5 bg-indigo-600 text-white rounded-full w-16 h-16 text-3xl shadow-xl hover:bg-indigo-700 transition flex items-center justify-center z-30">
+        ＋
+      </button>
 
       {/* 入力モーダル */}
       {showForm && (
