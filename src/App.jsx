@@ -44,8 +44,13 @@ export default function App() {
   const [adminItems,  setAdminItems]  = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [tab,         setTab]         = useState("list");
+
+  // フィルター
   const [filterSt,    setFilterSt]    = useState("すべて");
+  const [filterSite,  setFilterSite]  = useState("すべて");
   const [filterMonth, setFilterMonth] = useState(THIS_MONTH);
+  const [filterOrderMonth, setFilterOrderMonth] = useState("すべて");
+
   const [showForm,    setShowForm]    = useState(false);
   const [editId,      setEditId]      = useState(null);
   const [form,        setForm]        = useState({});
@@ -54,7 +59,7 @@ export default function App() {
   const [dupAlert,    setDupAlert]    = useState(null);
   const [printMode,   setPrintMode]   = useState(false);
   const [adminMonth,  setAdminMonth]  = useState(THIS_MONTH);
-  const [viewUserId,  setViewUserId]  = useState(null); // 管理画面で選択中のユーザー
+  const [viewUserId,  setViewUserId]  = useState(null);
 
   useEffect(() => {
     const style = document.createElement("style");
@@ -89,7 +94,6 @@ export default function App() {
     return unsub;
   }, [isAdmin]);
 
-  // 自分のデータ取得（管理者も自分のデータはuserIdで厳密に絞る）
   useEffect(() => {
     if (!user) return;
     const q = query(
@@ -104,7 +108,6 @@ export default function App() {
     return unsub;
   }, [user]);
 
-  // 管理画面: 選択ユーザーのデータ取得
   useEffect(() => {
     if (!isAdmin || !viewUserId) { setAdminItems([]); return; }
     const q = query(
@@ -220,12 +223,26 @@ export default function App() {
   const counts = { 購入済:0, 照合済:0, 精算済:0 };
   items.forEach(i => { if (counts[i.status] !== undefined) counts[i.status]++; });
 
+  // 注文月の一覧を動的生成
+  const orderMonths = ["すべて", ...Array.from(new Set(
+    items.map(i => i.orderedAt ? i.orderedAt.slice(0,7) : null).filter(Boolean)
+  )).sort().reverse()];
+
+  // フィルター適用
+  const listItems = items.filter(i => {
+    if (filterSt !== "すべて" && i.status !== filterSt) return false;
+    if (filterSite !== "すべて" && i.site !== filterSite) return false;
+    if (filterOrderMonth !== "すべて" && (!i.orderedAt || !i.orderedAt.startsWith(filterOrderMonth))) return false;
+    return true;
+  });
+
+  const hasFilter = filterSt !== "すべて" || filterSite !== "すべて" || filterOrderMonth !== "すべて";
+
   const monthItems = items.filter(i => i.settleMonth === filterMonth);
   const monthTotal = monthItems.reduce((s,i) => s+(Number(i.actualPrice)||0), 0);
   const paidTotal  = monthItems.filter(i=>i.status==="精算済").reduce((s,i)=>s+(Number(i.actualPrice)||0),0);
   const byCard     = Object.fromEntries(CARDS.map(c=>[c, monthItems.filter(i=>i.cardType===c).reduce((s,i)=>s+(Number(i.actualPrice)||0),0)]));
 
-  const listItems    = items.filter(i => filterSt==="すべて" || i.status===filterSt);
   const pendingCheck = items.filter(i => i.status==="購入済");
   const doneCheck    = items.filter(i => i.status==="照合済");
 
@@ -235,7 +252,6 @@ export default function App() {
   const reportTotal = reportItems.reduce((s,i)=>s+calcSettleAmount(i),0);
   const today       = new Date().toLocaleDateString("ja-JP");
 
-  // 管理画面用集計
   const adminMonthItems = adminItems.filter(i => i.settleMonth === adminMonth);
   const adminMonthTotal = adminMonthItems.reduce((s,i) => s+(Number(i.actualPrice)||0), 0);
   const adminCounts = { 購入済:0, 照合済:0, 精算済:0 };
@@ -379,7 +395,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
-      {/* ヘッダー */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-30">
         <div className="flex items-center justify-between">
           <div>
@@ -407,6 +422,7 @@ export default function App() {
         {/* 案件一覧 */}
         {tab === "list" && (
           <div className="space-y-3">
+            {/* ステータスカード */}
             <div className="grid grid-cols-3 gap-2">
               {Object.entries(counts).map(([st, n]) => (
                 <div key={st} onClick={() => setFilterSt(filterSt===st?"すべて":st)}
@@ -416,12 +432,53 @@ export default function App() {
                 </div>
               ))}
             </div>
-            {filterSt !== "すべて" && (
-              <div className="flex items-center justify-between bg-indigo-50 rounded-lg px-3 py-2">
-                <span className="text-xs text-indigo-600 font-medium">「{filterSt}」で絞り込み中</span>
-                <button onClick={() => setFilterSt("すべて")} className="text-xs text-indigo-400">クリア ✕</button>
+
+            {/* フィルターパネル */}
+            <div className="bg-white rounded-xl border border-gray-200 p-3 space-y-2">
+              <div className="text-xs font-bold text-gray-500">🔍 絞り込み</div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">購入サイト</label>
+                  <select className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
+                    value={filterSite} onChange={e => setFilterSite(e.target.value)}>
+                    <option value="すべて">すべて</option>
+                    {SITES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">注文月</label>
+                  <select className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
+                    value={filterOrderMonth} onChange={e => setFilterOrderMonth(e.target.value)}>
+                    {orderMonths.map(m => (
+                      <option key={m} value={m}>
+                        {m === "すべて" ? "すべて" : `${m.slice(0,4)}年${parseInt(m.slice(5))}月`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">処理状況</label>
+                  <select className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
+                    value={filterSt} onChange={e => setFilterSt(e.target.value)}>
+                    <option value="すべて">すべて</option>
+                    {Object.keys(STATUS_STYLE).map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+              {hasFilter && (
+                <button onClick={() => { setFilterSt("すべて"); setFilterSite("すべて"); setFilterOrderMonth("すべて"); }}
+                  className="text-xs text-indigo-500 underline">
+                  フィルターをクリア
+                </button>
+              )}
+            </div>
+
+            {hasFilter && (
+              <div className="text-xs text-indigo-600 bg-indigo-50 rounded-lg px-3 py-2">
+                {listItems.length}件 表示中
               </div>
             )}
+
             {loading && <div className="text-center text-gray-400 py-8">読み込み中...</div>}
             {!loading && listItems.length === 0 && <div className="text-center text-gray-400 py-12 bg-white rounded-xl">案件がありません</div>}
             {listItems.map(item => {
@@ -659,8 +716,6 @@ export default function App() {
             <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3 text-sm text-indigo-700 font-medium">
               👑 管理者画面 — ユーザーのデータを閲覧できます
             </div>
-
-            {/* ユーザー一覧 */}
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100 font-semibold text-sm text-gray-700">ユーザー一覧 ({allUsers.length}人)</div>
               {allUsers.map(u => (
@@ -680,8 +735,6 @@ export default function App() {
                 </div>
               ))}
             </div>
-
-            {/* 選択ユーザーのデータ */}
             {viewUserId && (
               <div className="space-y-3">
                 <div className="bg-white rounded-xl border border-gray-200 p-3">
@@ -691,7 +744,6 @@ export default function App() {
                     {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
                 </div>
-
                 <div className="grid grid-cols-3 gap-2">
                   {Object.entries(adminCounts).map(([st, n]) => (
                     <div key={st} className="bg-white rounded-xl border border-gray-200 p-3 text-center">
@@ -700,12 +752,10 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-
                 <div className="bg-indigo-600 rounded-xl p-4 text-white">
                   <div className="text-sm opacity-80 mb-1">{MONTHS.find(m=>m.value===adminMonth)?.label} 建て替え合計</div>
                   <div className="text-3xl font-bold">¥{adminMonthTotal.toLocaleString()}</div>
                 </div>
-
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-100 font-semibold text-sm text-gray-700">
                     {MONTHS.find(m=>m.value===adminMonth)?.label} の案件 ({adminMonthItems.length}件)
@@ -741,7 +791,6 @@ export default function App() {
         ＋
       </button>
 
-      {/* 入力モーダル */}
       {showForm && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-40">
           <div className="min-h-full flex items-end sm:items-center justify-center">
@@ -841,7 +890,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 重複アラート */}
       {dupAlert && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4">
@@ -856,7 +904,6 @@ export default function App() {
         </div>
       )}
 
-      {/* トースト */}
       {toast && (
         <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full text-sm font-medium shadow-lg z-50 whitespace-nowrap ${toast.err?"bg-red-500":"bg-gray-800"} text-white`}>
           {toast.msg}
