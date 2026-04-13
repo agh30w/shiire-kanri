@@ -45,11 +45,11 @@ export default function App() {
   const [loading,     setLoading]     = useState(true);
   const [tab,         setTab]         = useState("list");
 
-  // フィルター
-  const [filterSt,    setFilterSt]    = useState("すべて");
-  const [filterSite,  setFilterSite]  = useState("すべて");
-  const [filterMonth, setFilterMonth] = useState(THIS_MONTH);
-  const [filterOrderMonth, setFilterOrderMonth] = useState("すべて");
+  const [filterSt,         setFilterSt]         = useState("すべて");
+  const [filterSite,       setFilterSite]        = useState("すべて");
+  const [filterMonth,      setFilterMonth]       = useState(THIS_MONTH);
+  const [filterOrderMonth, setFilterOrderMonth]  = useState("すべて");
+  const [sortOrder,        setSortOrder]         = useState("createdAt_desc"); // ソート
 
   const [showForm,    setShowForm]    = useState(false);
   const [editId,      setEditId]      = useState(null);
@@ -223,17 +223,26 @@ export default function App() {
   const counts = { 購入済:0, 照合済:0, 精算済:0 };
   items.forEach(i => { if (counts[i.status] !== undefined) counts[i.status]++; });
 
-  // 注文月の一覧を動的生成
   const orderMonths = ["すべて", ...Array.from(new Set(
     items.map(i => i.orderedAt ? i.orderedAt.slice(0,7) : null).filter(Boolean)
   )).sort().reverse()];
 
-  // フィルター適用
-  const listItems = items.filter(i => {
+  // フィルター＋ソート適用
+  const filteredItems = items.filter(i => {
     if (filterSt !== "すべて" && i.status !== filterSt) return false;
     if (filterSite !== "すべて" && i.site !== filterSite) return false;
     if (filterOrderMonth !== "すべて" && (!i.orderedAt || !i.orderedAt.startsWith(filterOrderMonth))) return false;
     return true;
+  });
+
+  const listItems = [...filteredItems].sort((a, b) => {
+    if (sortOrder === "orderedAt_desc") {
+      return (b.orderedAt || "").localeCompare(a.orderedAt || "");
+    } else if (sortOrder === "orderedAt_asc") {
+      return (a.orderedAt || "").localeCompare(b.orderedAt || "");
+    }
+    // createdAt_desc (デフォルト)
+    return (b.createdAt || 0) - (a.createdAt || 0);
   });
 
   const hasFilter = filterSt !== "すべて" || filterSite !== "すべて" || filterOrderMonth !== "すべて";
@@ -422,21 +431,21 @@ export default function App() {
         {/* 案件一覧 */}
         {tab === "list" && (
           <div className="space-y-3">
-            {/* ステータスカード */}
+            {/* ステータスカード（小さめ） */}
             <div className="grid grid-cols-3 gap-2">
               {Object.entries(counts).map(([st, n]) => (
                 <div key={st} onClick={() => setFilterSt(filterSt===st?"すべて":st)}
-                  className={`bg-white rounded-xl border p-4 text-center cursor-pointer transition ${filterSt===st?"border-indigo-400 ring-1 ring-indigo-300":"border-gray-200"}`}>
-                  <div className="text-3xl font-bold text-gray-700">{n}</div>
-                  <div className="text-sm text-gray-400 mt-1">{st}</div>
+                  className={`bg-white rounded-xl border p-2.5 text-center cursor-pointer transition ${filterSt===st?"border-indigo-400 ring-1 ring-indigo-300":"border-gray-200"}`}>
+                  <div className="text-2xl font-bold text-gray-700">{n}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{st}</div>
                 </div>
               ))}
             </div>
 
-            {/* フィルターパネル */}
+            {/* フィルター＋ソートパネル */}
             <div className="bg-white rounded-xl border border-gray-200 p-3 space-y-2">
-              <div className="text-xs font-bold text-gray-500">🔍 絞り込み</div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="text-xs font-bold text-gray-500">🔍 絞り込み・並び替え</div>
+              <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-xs text-gray-400 block mb-1">購入サイト</label>
                   <select className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
@@ -462,6 +471,15 @@ export default function App() {
                     value={filterSt} onChange={e => setFilterSt(e.target.value)}>
                     <option value="すべて">すべて</option>
                     {Object.keys(STATUS_STYLE).map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">並び替え</label>
+                  <select className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
+                    value={sortOrder} onChange={e => setSortOrder(e.target.value)}>
+                    <option value="createdAt_desc">登録順（新しい順）</option>
+                    <option value="orderedAt_desc">注文日（新しい順）</option>
+                    <option value="orderedAt_asc">注文日（古い順）</option>
                   </select>
                 </div>
               </div>
@@ -791,6 +809,7 @@ export default function App() {
         ＋
       </button>
 
+      {/* 入力モーダル */}
       {showForm && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-40">
           <div className="min-h-full flex items-end sm:items-center justify-center">
@@ -800,6 +819,7 @@ export default function App() {
                 <button onClick={() => setShowForm(false)} className="text-gray-400 text-2xl leading-none w-10 h-10 flex items-center justify-center">✕</button>
               </div>
               <div className="p-5 space-y-4">
+                {/* 購入情報 */}
                 <div className="space-y-2">
                   <div className="text-xs font-bold text-indigo-600">📋 購入情報</div>
                   <div><label className="text-xs text-gray-500">購入サイト</label>
@@ -810,10 +830,35 @@ export default function App() {
                   <div><label className="text-xs text-gray-500">商品名 *</label>
                     <input className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base" placeholder="商品名" value={form.productName||""} onChange={e=>ff({productName:e.target.value})} />
                   </div>
+                  <div><label className="text-xs text-gray-500">注文日</label>
+                    <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base h-11" value={form.orderedAt||""} onChange={e=>ff({orderedAt:e.target.value})} />
+                  </div>
                   <div><label className="text-xs text-gray-500">指示金額（円）*</label>
                     <input inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base" placeholder="3280" value={form.instructedPrice||""} onChange={e=>ff({instructedPrice:e.target.value})} />
                   </div>
-                  <div className="flex items-center gap-3">
+                  {/* 購入金額 + 指示金額と同額ボタン */}
+                  <div>
+                    <div className="flex items-center justify-between mt-1 mb-1">
+                      <label className="text-xs text-gray-500">購入金額（円）</label>
+                      {form.instructedPrice && (
+                        <button
+                          onClick={() => ff({actualPrice: form.instructedPrice})}
+                          className="text-xs bg-indigo-50 text-indigo-600 border border-indigo-200 px-2 py-0.5 rounded-lg hover:bg-indigo-100 transition">
+                          指示金額と同額
+                        </button>
+                      )}
+                    </div>
+                    <input inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base h-11" placeholder="実購入額" value={form.actualPrice||""} onChange={e=>ff({actualPrice:e.target.value})} />
+                    {form.actualPrice && form.instructedPrice && (()=>{
+                      const d=Number(form.actualPrice)-Number(form.instructedPrice);
+                      if(d===0)return null;
+                      return <p className={`text-sm mt-1 ${d>0?"text-red-500":"text-green-500"}`}>{d>0?`⚠ 指示より ¥${d.toLocaleString()} 高い（自己負担）`:`✓ 指示より ¥${Math.abs(d).toLocaleString()} 安い`}</p>;
+                    })()}
+                  </div>
+                  <div><label className="text-xs text-gray-500">注文番号</label>
+                    <input className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base h-11 font-mono" placeholder="例: 123-4567890-1234567" value={form.orderNo||""} onChange={e=>ff({orderNo:e.target.value})} />
+                  </div>
+                  <div className="flex items-center gap-3 pt-1">
                     <input type="checkbox" id="pa" checked={!!form.pointAdjust} onChange={e=>ff({pointAdjust:e.target.checked})} className="w-5 h-5" />
                     <label htmlFor="pa" className="text-base text-gray-600">ポイント調整要</label>
                   </div>
@@ -822,26 +867,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="border-t border-gray-100"/>
-                <div className="space-y-2">
-                  <div className="text-xs font-bold text-blue-600">🛒 購入報告</div>
-                  <div className="flex flex-col gap-2">
-                    <div className="flex-1"><label className="text-xs text-gray-500">注文日</label>
-                      <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base h-11" value={form.orderedAt||""} onChange={e=>ff({orderedAt:e.target.value})} />
-                    </div>
-                    <div className="flex-1"><label className="text-xs text-gray-500">購入金額（円）</label>
-                      <input inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base h-11" placeholder="実購入額" value={form.actualPrice||""} onChange={e=>ff({actualPrice:e.target.value})} />
-                    </div>
-                  </div>
-                  {form.actualPrice && form.instructedPrice && (()=>{
-                    const d=Number(form.actualPrice)-Number(form.instructedPrice);
-                    if(d===0)return null;
-                    return <p className={`text-sm ${d>0?"text-red-500":"text-green-500"}`}>{d>0?`⚠ 指示より ¥${d.toLocaleString()} 高い（自己負担）`:`✓ 指示より ¥${Math.abs(d).toLocaleString()} 安い`}</p>;
-                  })()}
-                  <div><label className="text-xs text-gray-500">注文番号</label>
-                    <input className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-base h-11 font-mono" placeholder="例: 123-4567890-1234567" value={form.orderNo||""} onChange={e=>ff({orderNo:e.target.value})} />
-                  </div>
-                </div>
-                <div className="border-t border-gray-100"/>
+                {/* 明細照合 */}
                 <div className="space-y-2">
                   <div className="text-xs font-bold text-yellow-600">🧾 明細照合</div>
                   <div className="flex flex-col gap-2">
@@ -861,6 +887,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="border-t border-gray-100"/>
+                {/* ステータス */}
                 <div>
                   <div className="text-xs font-bold text-gray-500 mb-2">📌 ステータス</div>
                   <div className="grid grid-cols-3 gap-2">
