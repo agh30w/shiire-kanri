@@ -64,7 +64,9 @@ export default function App() {
     return Object.fromEntries(CARDS.map(c => [c, { start: range.start, end: range.end }]));
   };
   const [cardRanges, setCardRanges] = useState(initCardRanges);
-  const [reportTitle, setReportTitle] = useState("");
+  const [reportYear,  setReportYear]  = useState(String(new Date().getFullYear()));
+  const [reportMonth2, setReportMonth2] = useState(String(new Date().getMonth() + 1));
+  const reportTitle = `${reportYear}年${reportMonth2}月分`;
 
   const [showForm,    setShowForm]    = useState(false);
   const [editId,      setEditId]      = useState(null);
@@ -664,12 +666,20 @@ export default function App() {
         {/* 報告書 */}
         {tab === "report" && (
           <div className="space-y-3">
-            {/* タイトル入力 */}
+            {/* タイトル: 年月選択 */}
             <div className="bg-white rounded-xl border border-gray-200 p-3">
-              <label className="text-xs text-gray-500 block mb-1">報告書タイトル（任意）</label>
-              <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
-                placeholder="例: 2026年3月分 立て替え精算"
-                value={reportTitle} onChange={e => setReportTitle(e.target.value)} />
+              <label className="text-xs text-gray-500 block mb-1">精算年月</label>
+              <div className="flex items-center gap-2">
+                <select className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  value={reportYear} onChange={e => setReportYear(e.target.value)}>
+                  {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}年</option>)}
+                </select>
+                <select className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  value={reportMonth2} onChange={e => setReportMonth2(e.target.value)}>
+                  {Array.from({length:12},(_,i)=>i+1).map(m => <option key={m} value={m}>{m}月</option>)}
+                </select>
+                <span className="text-sm text-gray-600 whitespace-nowrap font-medium">{reportTitle}</span>
+              </div>
             </div>
 
             {/* カードごとの利用日範囲設定 */}
