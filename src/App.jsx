@@ -24,6 +24,14 @@ const genMonths = () => {
 const MONTHS     = genMonths();
 const THIS_MONTH = MONTHS[1]?.value || MONTHS[0]?.value;
 
+// 当月の1日と末日を返す
+const getMonthRange = (monthValue) => {
+  const [y, m] = monthValue.split("-").map(Number);
+  const start = `${monthValue}-01`;
+  const end = new Date(y, m, 0).toISOString().slice(0, 10);
+  return { start, end };
+};
+
 const STATUS_STYLE = {
   購入済: "bg-blue-100 text-blue-700",
   照合済: "bg-yellow-100 text-yellow-700",
@@ -49,7 +57,14 @@ export default function App() {
   const [filterSite,       setFilterSite]       = useState("すべて");
   const [filterOrderMonth, setFilterOrderMonth] = useState("すべて");
   const [sortOrder,        setSortOrder]        = useState("createdAt_desc");
-  const [reportMonth,      setReportMonth]      = useState(THIS_MONTH);
+
+  // 報告書: カードごとの利用日範囲
+  const initCardRanges = () => {
+    const range = getMonthRange(THIS_MONTH);
+    return Object.fromEntries(CARDS.map(c => [c, { start: range.start, end: range.end }]));
+  };
+  const [cardRanges, setCardRanges] = useState(initCardRanges);
+  const [reportTitle, setReportTitle] = useState("");
 
   const [showForm,    setShowForm]    = useState(false);
   const [editId,      setEditId]      = useState(null);
@@ -59,6 +74,7 @@ export default function App() {
   const [dupAlert,    setDupAlert]    = useState(null);
   const [printMode,   setPrintMode]   = useState(false);
   const [viewUserId,  setViewUserId]  = useState(null);
+  const [adminMonth,  setAdminMonth]  = useState(THIS_MONTH);
 
   useEffect(() => {
     const style = document.createElement("style");
@@ -220,7 +236,6 @@ export default function App() {
     } else { await doSave(); }
   };
 
-  // 照合済みを解消して購入済に戻す
   const uncheck = async (item) => {
     if (!confirm("照合を解消して「購入済」に戻しますか？")) return;
     const updated = {...item, status:"購入済", settledAt:"", settleMonth:""};
@@ -229,10 +244,20 @@ export default function App() {
     showToast("照合を解消しました");
   };
 
-  // 月単位で照合済を一括精算済にする
-  const bulkSettle = async (month) => {
-    if (!confirm(`${MONTHS.find(m=>m.value===month)?.label ?? month} の照合済案件を全て精算済にしますか？`)) return;
-    const targets = items.filter(i => i.status === "照合済" && i.settleMonth === month);
+  // カードごとの利用日範囲で照合済を一括精算済にする
+  const bulkSettle = async () => {
+    const targets = CARDS.flatMap(card => {
+      const range = cardRanges[card];
+      if (!range.start || !range.end) return [];
+      return items.filter(i =>
+        i.status === "照合済" &&
+        (i.cardType === card || (!CARDS.includes(i.cardType) && card === "その他")) &&
+        i.settledAt >= range.start &&
+        i.settledAt <= range.end
+      );
+    });
+    if (targets.length === 0) { alert("精算対象の案件がありません"); return; }
+    if (!confirm(`表示中の照合済 ${targets.length}件 を精算済にしますか？`)) return;
     for (const item of targets) {
       await persist({...item, status:"精算済"});
     }
@@ -270,20 +295,26 @@ export default function App() {
     return actual > instructed ? instructed : actual;
   };
 
-  // 報告書: 照合済・精算済を対象、カードタイプ未設定はその他扱い
-  const reportMonthItems   = items.filter(i => i.settleMonth === reportMonth && (i.status === "照合済" || i.status === "精算済"));
-  const reportCheckedItems = items.filter(i => i.settleMonth === reportMonth && i.status === "照合済");
-  const reportSettledItems = items.filter(i => i.settleMonth === reportMonth && i.status === "精算済");
-  const reportCheckedTotal = reportCheckedItems.reduce((s,i) => s + calcSettleAmount(i), 0);
-  const reportSettledTotal = reportSettledItems.reduce((s,i) => s + calcSettleAmount(i), 0);
-  const reportTotal        = reportMonthItems.reduce((s,i) => s + calcSettleAmount(i), 0);
-  const reportMonthLabel   = MONTHS.find(m => m.value===reportMonth)?.label || reportMonth;
-  const today              = new Date().toLocaleDateString("ja-JP");
-
-  // カード別にグループ化（未設定はその他に）
   const getCardType = (item) => CARDS.includes(item.cardType) ? item.cardType : "その他";
 
-  const adminMonthItems = adminItems.filter(i => i.settleMonth === reportMonth);
+  // カードごとに利用日範囲で絞り込んだ照合済レコード
+  const reportItemsByCard = Object.fromEntries(CARDS.map(card => {
+    const range = cardRanges[card];
+    if (!range.start || !range.end) return [card, []];
+    const ci = items.filter(i =>
+      i.status === "照合済" &&
+      getCardType(i) === card &&
+      i.settledAt >= range.start &&
+      i.settledAt <= range.end
+    );
+    return [card, ci];
+  }));
+
+  const allReportItems = CARDS.flatMap(c => reportItemsByCard[c]);
+  const reportTotal    = allReportItems.reduce((s,i) => s + calcSettleAmount(i), 0);
+  const today          = new Date().toLocaleDateString("ja-JP");
+
+  const adminMonthItems = adminItems.filter(i => i.settleMonth === adminMonth);
   const adminMonthTotal = adminMonthItems.reduce((s,i) => s+(Number(i.actualPrice)||0), 0);
   const adminCounts = { 購入済:0, 照合済:0, 精算済:0 };
   adminItems.forEach(i => { if (adminCounts[i.status] !== undefined) adminCounts[i.status]++; });
@@ -343,17 +374,22 @@ export default function App() {
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">仕入れ立て替え精算報告書</h1>
-          <p className="text-sm text-gray-500 mt-1">精算月: {reportMonthLabel}　／　出力日: {today}</p>
+          {reportTitle && <p className="text-base font-medium text-gray-700 mt-1">{reportTitle}</p>}
+          <p className="text-sm text-gray-500 mt-1">出力日: {today}</p>
         </div>
-        {reportMonthItems.length === 0 && <div className="text-center text-gray-400 py-12 border border-dashed border-gray-200 rounded-xl">対象の案件がありません</div>}
+        {allReportItems.length === 0 && <div className="text-center text-gray-400 py-12 border border-dashed border-gray-200 rounded-xl">対象の案件がありません</div>}
         {CARDS.map(card => {
-          const ci = reportMonthItems.filter(i => getCardType(i) === card);
+          const ci = reportItemsByCard[card];
           if (ci.length === 0) return null;
+          const range = cardRanges[card];
           const ct = ci.reduce((s,i)=>s+(Number(i.actualPrice)||0),0);
           const settleTotal = ci.reduce((s,i)=>s+calcSettleAmount(i),0);
           return (
             <div key={card}>
-              <div className="text-sm font-bold text-indigo-700 bg-indigo-50 border-l-4 border-indigo-500 px-3 py-2 rounded-r-lg mb-2">💳 {card}</div>
+              <div className="text-sm font-bold text-indigo-700 bg-indigo-50 border-l-4 border-indigo-500 px-3 py-2 rounded-r-lg mb-1">
+                💳 {card}
+                <span className="text-xs font-normal text-indigo-500 ml-2">利用日: {range.start} 〜 {range.end}</span>
+              </div>
               <table className="w-full text-sm border-collapse table-fixed">
                 <colgroup>
                   <col style={{width:"22%"}} />
@@ -369,7 +405,7 @@ export default function App() {
                   <tr className="bg-gray-50 text-xs text-gray-500">
                     <th className="text-left px-3 py-2 border-b border-gray-200">商品名</th>
                     <th className="text-left px-3 py-2 border-b border-gray-200">注文日</th>
-                    <th className="text-left px-3 py-2 border-b border-gray-200">明細書利用日</th>
+                    <th className="text-left px-3 py-2 border-b border-gray-200">利用日</th>
                     <th className="text-right px-3 py-2 border-b border-gray-200">指示金額</th>
                     <th className="text-right px-3 py-2 border-b border-gray-200">明細金額</th>
                     <th className="text-right px-3 py-2 border-b border-gray-200">差分</th>
@@ -408,11 +444,11 @@ export default function App() {
             </div>
           );
         })}
-        {reportMonthItems.length > 0 && (
+        {allReportItems.length > 0 && (
           <div className="bg-indigo-600 text-white rounded-xl p-5 flex justify-between items-center">
             <div>
-              <div className="font-bold">合計請求金額（{reportMonthItems.length}件）</div>
-              <div className="text-xs opacity-70 mt-1">照合済・精算済の案件合計</div>
+              <div className="font-bold">合計請求金額（{allReportItems.length}件）</div>
+              <div className="text-xs opacity-70 mt-1">照合済の案件合計</div>
             </div>
             <div className="text-3xl font-bold">¥{reportTotal.toLocaleString()}</div>
           </div>
@@ -513,9 +549,7 @@ export default function App() {
                 <div key={item.id} className="bg-white rounded-xl border border-gray-200 p-4 cursor-pointer active:bg-gray-50" onClick={() => openEdit(item)}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className="text-xs text-gray-400">{item.site}</span>
-                      </div>
+                      <span className="text-xs text-gray-400">{item.site}</span>
                       <div className="font-semibold text-gray-800 truncate text-base">{item.productName}</div>
                       <div className="text-sm text-gray-500 mt-1 flex flex-wrap gap-x-2">
                         <span>指示: <span className="font-medium text-gray-700">¥{Number(item.instructedPrice).toLocaleString()}</span></span>
@@ -590,8 +624,6 @@ export default function App() {
                 </div>
               );
             })}
-
-            {/* 照合済みリスト（詳細表示＋解消ボタン） */}
             {doneCheck.length > 0 && (
               <>
                 <div className="text-xs text-gray-400 font-medium px-1 pt-2">照合済み（精算待ち） {doneCheck.length}件</div>
@@ -632,90 +664,88 @@ export default function App() {
         {/* 報告書 */}
         {tab === "report" && (
           <div className="space-y-3">
-            <div className="bg-white rounded-xl border border-gray-200 p-3 flex items-end gap-3">
-              <div className="flex-1">
-                <label className="text-xs text-gray-500 block mb-1">精算月</label>
-                <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
-                  value={reportMonth} onChange={e => setReportMonth(e.target.value)}>
-                  {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                </select>
-              </div>
-              <button onClick={() => setPrintMode(true)}
-                className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700 transition whitespace-nowrap">
-                🖨 印刷・PDF
-              </button>
+            {/* タイトル入力 */}
+            <div className="bg-white rounded-xl border border-gray-200 p-3">
+              <label className="text-xs text-gray-500 block mb-1">報告書タイトル（任意）</label>
+              <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                placeholder="例: 2026年3月分 立て替え精算"
+                value={reportTitle} onChange={e => setReportTitle(e.target.value)} />
             </div>
 
-            {/* サマリー */}
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
-                <div className="text-xs text-gray-400 mb-1">精算対象合計</div>
-                <div className="text-sm font-bold text-gray-800">¥{reportTotal.toLocaleString()}</div>
-              </div>
-              <div className="bg-white rounded-xl border border-yellow-200 p-3 text-center">
-                <div className="text-xs text-yellow-600 mb-1">未精算（照合済）</div>
-                <div className="text-sm font-bold text-yellow-700">¥{reportCheckedTotal.toLocaleString()}</div>
-              </div>
-              <div className="bg-white rounded-xl border border-green-200 p-3 text-center">
-                <div className="text-xs text-green-600 mb-1">精算済み</div>
-                <div className="text-sm font-bold text-green-700">¥{reportSettledTotal.toLocaleString()}</div>
-              </div>
+            {/* カードごとの利用日範囲設定 */}
+            <div className="bg-white rounded-xl border border-gray-200 p-3 space-y-3">
+              <div className="text-xs font-bold text-gray-600">💳 カード別 利用日範囲</div>
+              {CARDS.map(card => (
+                <div key={card} className="space-y-1">
+                  <div className="text-xs font-medium text-gray-600">{card}</div>
+                  <div className="flex items-center gap-2">
+                    <input type="date" className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs h-9"
+                      value={cardRanges[card].start}
+                      onChange={e => setCardRanges(p => ({...p, [card]: {...p[card], start: e.target.value}}))} />
+                    <span className="text-xs text-gray-400">〜</span>
+                    <input type="date" className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs h-9"
+                      value={cardRanges[card].end}
+                      onChange={e => setCardRanges(p => ({...p, [card]: {...p[card], end: e.target.value}}))} />
+                    <span className="text-xs text-gray-500 whitespace-nowrap">{reportItemsByCard[card].length}件</span>
+                  </div>
+                </div>
+              ))}
             </div>
 
-            {reportCheckedItems.length > 0 && (
-              <button onClick={() => bulkSettle(reportMonth)}
-                className="w-full bg-green-500 text-white py-3 rounded-xl text-sm font-semibold hover:bg-green-600 transition">
-                ✅ {reportMonthLabel} の照合済 {reportCheckedItems.length}件 を一括精算済にする
-              </button>
+            {/* 合計・ボタン */}
+            {allReportItems.length > 0 && (
+              <div className="bg-indigo-600 text-white rounded-xl p-4 flex justify-between items-center">
+                <div className="text-sm font-bold">合計請求金額（{allReportItems.length}件）</div>
+                <div className="text-2xl font-bold">¥{reportTotal.toLocaleString()}</div>
+              </div>
             )}
 
-            <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
-              <div>
-                <div className="text-base font-bold text-gray-800">仕入れ立て替え精算報告書</div>
-                <div className="text-xs text-gray-400 mt-0.5">精算月: {reportMonthLabel}　／　出力日: {today}</div>
-              </div>
-              {reportMonthItems.length === 0 && <div className="text-center text-gray-400 py-8">対象の案件がありません</div>}
-              {CARDS.map(card => {
-                const ci = reportMonthItems.filter(i => getCardType(i) === card);
-                if (ci.length===0) return null;
-                const settleTotal = ci.reduce((s,i)=>s+calcSettleAmount(i),0);
-                return (
-                  <div key={card}>
-                    <div className="text-xs font-bold text-indigo-700 bg-indigo-50 border-l-4 border-indigo-500 px-3 py-2 rounded-r-lg mb-2">💳 {card}</div>
-                    <div className="space-y-1">
-                      {ci.map(item => {
-                        const settleAmt = calcSettleAmount(item);
-                        return (
-                          <div key={item.id} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-50">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <div className="font-medium text-gray-800 truncate">{item.productName}</div>
-                                <span className={`text-xs px-1.5 py-0.5 rounded-full flex-shrink-0 ${STATUS_STYLE[item.status]}`}>{item.status}</span>
-                              </div>
-                              <div className="text-gray-400">注文日: {item.orderedAt||"—"}　利用日: {item.settledAt||"—"}</div>
-                            </div>
-                            <div className="font-bold text-gray-800 ml-3 flex-shrink-0">
-                              ¥{settleAmt.toLocaleString()}
-                              {Number(item.actualPrice) > Number(item.instructedPrice) && <span className="text-red-500 text-xs ml-1">+¥{(Number(item.actualPrice)-Number(item.instructedPrice)).toLocaleString()}</span>}
-                            </div>
-                          </div>
-                        );
-                      })}
-                      <div className="flex justify-between text-xs py-1">
-                        <span className="font-bold text-indigo-700">{card} 小計（請求）</span>
-                        <span className="font-bold text-indigo-700">¥{settleTotal.toLocaleString()}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              {reportMonthItems.length > 0 && (
-                <div className="bg-indigo-600 text-white rounded-xl p-4 flex justify-between items-center">
-                  <div className="text-sm font-bold">合計請求金額（{reportMonthItems.length}件）</div>
-                  <div className="text-2xl font-bold">¥{reportTotal.toLocaleString()}</div>
-                </div>
+            <div className="flex gap-2">
+              <button onClick={() => setPrintMode(true)}
+                className="flex-1 bg-indigo-600 text-white py-3 rounded-xl text-sm font-semibold hover:bg-indigo-700 transition">
+                🖨 印刷・PDF
+              </button>
+              {allReportItems.length > 0 && (
+                <button onClick={bulkSettle}
+                  className="flex-1 bg-green-500 text-white py-3 rounded-xl text-sm font-semibold hover:bg-green-600 transition">
+                  ✅ 一括精算済にする
+                </button>
               )}
             </div>
+
+            {/* カード別プレビュー */}
+            {CARDS.map(card => {
+              const ci = reportItemsByCard[card];
+              if (ci.length === 0) return null;
+              const settleTotal = ci.reduce((s,i)=>s+calcSettleAmount(i),0);
+              return (
+                <div key={card} className="bg-white rounded-xl border border-gray-200 p-4 space-y-2">
+                  <div className="text-xs font-bold text-indigo-700 bg-indigo-50 border-l-4 border-indigo-500 px-3 py-1.5 rounded-r-lg">
+                    💳 {card}　<span className="font-normal text-indigo-500">{cardRanges[card].start} 〜 {cardRanges[card].end}</span>
+                  </div>
+                  {ci.map(item => {
+                    const settleAmt = calcSettleAmount(item);
+                    const diff = Number(item.actualPrice) - Number(item.instructedPrice);
+                    return (
+                      <div key={item.id} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-50">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-800 truncate">{item.productName}</div>
+                          <div className="text-gray-400">注文日: {item.orderedAt||"—"}　利用日: {item.settledAt||"—"}</div>
+                        </div>
+                        <div className="font-bold text-gray-800 ml-3 flex-shrink-0">
+                          ¥{settleAmt.toLocaleString()}
+                          {diff > 0 && <span className="text-red-500 text-xs ml-1">+¥{diff.toLocaleString()}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="flex justify-between text-xs pt-1 font-bold text-indigo-700">
+                    <span>{card} 小計</span>
+                    <span>¥{settleTotal.toLocaleString()}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -749,7 +779,7 @@ export default function App() {
                 <div className="bg-white rounded-xl border border-gray-200 p-3">
                   <div className="text-xs text-gray-500 mb-1">閲覧中: <span className="font-medium text-gray-700">{viewingUserEmail}</span></div>
                   <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
-                    value={reportMonth} onChange={e => setReportMonth(e.target.value)}>
+                    value={adminMonth} onChange={e => setAdminMonth(e.target.value)}>
                     {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
                 </div>
@@ -762,12 +792,12 @@ export default function App() {
                   ))}
                 </div>
                 <div className="bg-indigo-600 rounded-xl p-4 text-white">
-                  <div className="text-sm opacity-80 mb-1">{MONTHS.find(m=>m.value===reportMonth)?.label} 建て替え合計</div>
+                  <div className="text-sm opacity-80 mb-1">{MONTHS.find(m=>m.value===adminMonth)?.label} 建て替え合計</div>
                   <div className="text-3xl font-bold">¥{adminMonthTotal.toLocaleString()}</div>
                 </div>
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-100 font-semibold text-sm text-gray-700">
-                    {MONTHS.find(m=>m.value===reportMonth)?.label} の案件 ({adminMonthItems.length}件)
+                    {MONTHS.find(m=>m.value===adminMonth)?.label} の案件 ({adminMonthItems.length}件)
                   </div>
                   {adminMonthItems.length===0 && <div className="px-4 py-6 text-center text-sm text-gray-400">該当する案件がありません</div>}
                   {adminMonthItems.map(item => {
