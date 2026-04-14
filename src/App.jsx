@@ -299,7 +299,7 @@ export default function App() {
 
   const getCardType = (item) => CARDS.includes(item.cardType) ? item.cardType : "その他";
 
-  // カードごとに利用日範囲で絞り込んだ照合済レコード
+  // カードごとに利用日範囲で絞り込んだ照合済レコード（利用日昇順）
   const reportItemsByCard = Object.fromEntries(CARDS.map(card => {
     const range = cardRanges[card];
     if (!range.start || !range.end) return [card, []];
@@ -308,7 +308,7 @@ export default function App() {
       getCardType(i) === card &&
       i.settledAt >= range.start &&
       i.settledAt <= range.end
-    );
+    ).sort((a, b) => (a.settledAt || "").localeCompare(b.settledAt || ""));
     return [card, ci];
   }));
 
