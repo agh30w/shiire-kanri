@@ -324,7 +324,10 @@ export default function App() {
   // インポート機能
   const [importText,    setImportText]    = useState("");
   const [importSource,  setImportSource]  = useState("rakuten");
+  const [importSite,    setImportSite]    = useState("楽天市場");
+  const [importCard,    setImportCard]    = useState("楽天カード");
   const [importParsed,  setImportParsed]  = useState([]);
+  const [importChecked, setImportChecked] = useState({});
   const [importCardType, setImportCardType] = useState("楽天カード");
 
   const parseRakuten = (text) => {
