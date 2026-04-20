@@ -77,7 +77,6 @@ export default function App() {
   const [printMode,   setPrintMode]   = useState(false);
   const [viewUserId,  setViewUserId]  = useState(null);
   const [adminMonth,  setAdminMonth]  = useState(THIS_MONTH);
-
   useEffect(() => {
     const style = document.createElement("style");
     style.textContent = PRINT_CSS;
@@ -322,10 +321,122 @@ export default function App() {
   adminItems.forEach(i => { if (adminCounts[i.status] !== undefined) adminCounts[i.status]++; });
   const viewingUserEmail = allUsers.find(u => u.uid === viewUserId)?.email || "";
 
+  // インポート機能
+  const [importText,    setImportText]    = useState("");
+  const [importSource,  setImportSource]  = useState("rakuten");
+  const [importParsed,  setImportParsed]  = useState([]);
+  const [importCardType, setImportCardType] = useState("楽天カード");
+
+  const parseRakuten = (text) => {
+    const results = [];
+    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+    let i = 0;
+    while (i < lines.length) {
+      // 注文日の行を探す
+      const dateMatch = lines[i].match(/注文日[：:]\s*(\d{4})\/(\d{2})\/(\d{2})/);
+      if (dateMatch) {
+        const orderedAt = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+        // 次の行に注文番号
+        let orderNo = "";
+        if (i+1 < lines.length) {
+          const noMatch = lines[i+1].match(/注文番号[：:]\s*(\S+)/);
+          if (noMatch) orderNo = noMatch[1];
+        }
+        // 商品名と金額を探す（注文番号の後）
+        let productName = "";
+        let price = "";
+        for (let j = i+2; j < Math.min(i+15, lines.length); j++) {
+          const priceMatch = lines[j].match(/^([\d,]+)円$/);
+          if (priceMatch && productName) {
+            price = priceMatch[1].replace(/,/g, "");
+            break;
+          }
+          // 商品名候補（注文詳細・問い合わせ・その他などは除外）
+          if (!lines[j].match(/^(注文詳細|問い合わせ|その他|商品レビュー|もう一度|お気に入り|リンク|ROOM|配送|配達|おすすめ)/) &&
+              !lines[j].match(/注文番号/) && lines[j].length > 5 && !productName) {
+            productName = lines[j];
+          }
+        }
+        if (productName && price) {
+          results.push({ orderedAt, orderNo, productName, instructedPrice: price, site: "楽天市場" });
+        }
+      }
+      i++;
+    }
+    return results;
+  };
+
+  const parseYahoo = (text) => {
+    const results = [];
+    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+    let i = 0;
+    while (i < lines.length) {
+      // 日付行を探す（例: 2026年4月19日）
+      const dateMatch = lines[i].match(/^(\d{4})年(\d{1,2})月(\d{1,2})日$/);
+      if (dateMatch) {
+        const orderedAt = `${dateMatch[1]}-${String(dateMatch[2]).padStart(2,"0")}-${String(dateMatch[3]).padStart(2,"0")}`;
+        let productName = "";
+        let price = "";
+        let orderNo = "";
+        // キャンセル済みはスキップ
+        if (i+1 < lines.length && lines[i+1].includes("キャンセル")) { i++; continue; }
+        for (let j = i+1; j < Math.min(i+20, lines.length); j++) {
+          // 注文番号
+          const noMatch = lines[j].match(/注文番号[：:]\s*(\S+)/);
+          if (noMatch) { orderNo = noMatch[1]; break; }
+          // 金額
+          const priceMatch = lines[j].match(/^([\d,]+)円$/);
+          if (priceMatch && productName) { price = priceMatch[1].replace(/,/g, ""); continue; }
+          // 商品名（除外パターン以外）
+          if (!lines[j].match(/^(注文確認中|配達完了|発送済み|キャンセル|注文詳細|お問い合わせ|レビュー|領収書|すべて見る|最大|※上限|友だち|LINE|配達|注文番号)/) &&
+              lines[j].length > 3 && !productName && !lines[j].match(/^\d+pt$/)) {
+            productName = lines[j];
+          }
+        }
+        if (productName && price && orderNo) {
+          results.push({ orderedAt, orderNo, productName, instructedPrice: price, site: "Yahoo!ショッピング" });
+        }
+      }
+      i++;
+    }
+    return results;
+  };
+
+  const handleImportParse = () => {
+    if (!importText.trim()) return;
+    const parsed = importSource === "rakuten" ? parseRakuten(importText) : parseYahoo(importText);
+    setImportParsed(parsed);
+  };
+
+  const handleImportExecute = async () => {
+    if (importParsed.length === 0) return;
+    if (!confirm(`${importParsed.length}件をインポートしますか？`)) return;
+    for (const item of importParsed) {
+      const newItem = {
+        ...blankForm(),
+        id: Date.now() + Math.random(),
+        createdAt: Date.now(),
+        site: item.site,
+        productName: item.productName,
+        instructedPrice: item.instructedPrice,
+        orderedAt: item.orderedAt,
+        orderNo: item.orderNo,
+        cardType: importCardType,
+        status: "購入済",
+      };
+      await persist(newItem);
+    }
+    setImportText("");
+    setImportParsed([]);
+    showToast(`${importParsed.length}件をインポートしました`);
+    setTab("list");
+  };
+
   const TABS = [
     {id:"list",   label:"案件一覧"},
     {id:"check",  label:"明細照合"},
     {id:"report", label:"報告書"},
+    {id:"import", label:"インポート"},
     ...(isAdmin ? [{id:"admin", label:"管理"}] : []),
   ];
 
@@ -756,6 +867,170 @@ export default function App() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* インポート */}
+        {tab === "import" && (
+          <div className="space-y-3">
+            <div className="bg-white rounded-xl border border-gray-200 p-3 space-y-3">
+              <div className="text-xs font-bold text-gray-600">📥 購入履歴インポート</div>
+
+              {/* サイト選択 */}
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">購入サイト</label>
+                <div className="flex gap-2">
+                  {[{v:"rakuten",l:"楽天市場"},{v:"yahoo",l:"Yahoo!ショッピング"}].map(s => (
+                    <button key={s.v} onClick={() => { setImportSource(s.v); setImportParsed([]); }}
+                      className={`flex-1 py-2 rounded-lg text-sm font-medium border transition ${importSource===s.v?"bg-indigo-600 text-white border-indigo-600":"border-gray-200 text-gray-500"}`}>
+                      {s.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* クレカ選択 */}
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">使用クレカ</label>
+                <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  value={importCardType} onChange={e => setImportCardType(e.target.value)}>
+                  {CARDS.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              {/* テキスト貼り付け */}
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">
+                  {importSource === "rakuten" ? "楽天市場" : "Yahoo!ショッピング"}の購入履歴ページをすべて選択してコピー&ペースト
+                </label>
+                <textarea
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono h-32"
+                  placeholder="購入履歴ページのテキストをここに貼り付けてください"
+                  value={importText}
+                  onChange={e => { setImportText(e.target.value); setImportParsed([]); }}
+                />
+              </div>
+
+              <button onClick={handleImportParse}
+                className="w-full bg-indigo-600 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-indigo-700 transition">
+                解析する
+              </button>
+            </div>
+
+            {/* 解析結果プレビュー */}
+            {importParsed.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs text-indigo-600 bg-indigo-50 rounded-lg px-3 py-2 font-medium">
+                  {importParsed.length}件 検出されました。内容を確認してインポートしてください。
+                </div>
+                {importParsed.map((item, idx) => (
+                  <div key={idx} className="bg-white rounded-xl border border-gray-200 p-3">
+                    <div className="text-sm font-medium text-gray-800 truncate">{item.productName}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {item.site}　注文日: {item.orderedAt}　¥{Number(item.instructedPrice).toLocaleString()}
+                    </div>
+                    {item.orderNo && <div className="text-xs text-gray-400 font-mono">{item.orderNo}</div>}
+                  </div>
+                ))}
+                <button onClick={handleImportExecute}
+                  className="w-full bg-green-500 text-white py-3 rounded-xl text-sm font-semibold hover:bg-green-600 transition">
+                  ✅ {importParsed.length}件を案件一覧にインポート
+                </button>
+              </div>
+            )}
+
+            {importText && importParsed.length === 0 && (
+              <div className="text-center text-gray-400 py-6 bg-white rounded-xl text-sm">
+                「解析する」を押してください
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* インポート */}
+        {tab === "import" && (
+          <div className="space-y-3">
+            <div className="bg-yellow-50 border border-yellow-100 rounded-xl px-4 py-3 text-sm text-yellow-700">
+              📋 楽天・Yahoo!の注文履歴ページを開き、全テキストをコピーして貼り付けてください。
+            </div>
+
+            {/* サイト・カード選択 */}
+            <div className="bg-white rounded-xl border border-gray-200 p-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">購入サイト</label>
+                  <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                    value={importSite} onChange={e => { setImportSite(e.target.value); setImportParsed([]); }}>
+                    <option>楽天市場</option>
+                    <option>Yahoo!ショッピング</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">クレカ</label>
+                  <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                    value={importCard} onChange={e => setImportCard(e.target.value)}>
+                    {CARDS.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* テキスト貼り付け */}
+            <div className="bg-white rounded-xl border border-gray-200 p-3">
+              <label className="text-xs text-gray-500 block mb-1">注文履歴テキストを貼り付け</label>
+              <textarea
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono"
+                rows={6}
+                placeholder={importSite === "楽天市場"
+                  ? "楽天市場の購入履歴ページを全選択→コピーして貼り付け"
+                  : "Yahoo!ショッピングの注文履歴ページを全選択→コピーして貼り付け"}
+                value={importText}
+                onChange={e => { setImportText(e.target.value); setImportParsed([]); }}
+              />
+              <button onClick={handleParse}
+                className="w-full mt-2 bg-indigo-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition">
+                解析する
+              </button>
+            </div>
+
+            {/* 解析結果プレビュー */}
+            {importParsed.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between px-1">
+                  <div className="text-xs font-bold text-gray-600">{importParsed.length}件検出　チェックした案件をインポートします</div>
+                  <div className="flex gap-2">
+                    <button onClick={() => { const c = {}; importParsed.forEach((_,i) => c[i]=true); setImportChecked(c); }}
+                      className="text-xs text-indigo-500 underline">全選択</button>
+                    <button onClick={() => setImportChecked({})}
+                      className="text-xs text-gray-400 underline">全解除</button>
+                  </div>
+                </div>
+                {importParsed.map((item, i) => (
+                  <div key={i} onClick={() => setImportChecked(p => ({...p, [i]: !p[i]}))}
+                    className={`bg-white rounded-xl border p-3 cursor-pointer transition ${importChecked[i]?"border-indigo-400 bg-indigo-50":"border-gray-200 opacity-50"}`}>
+                    <div className="flex items-start gap-2">
+                      <input type="checkbox" checked={!!importChecked[i]} readOnly className="mt-0.5 w-4 h-4 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-800 truncate">{item.productName}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">
+                          注文日: {item.orderedAt}　¥{item.price.toLocaleString()}
+                          {item.orderNo && <span className="ml-2 font-mono">{item.orderNo}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <button onClick={handleImport}
+                  className="w-full bg-green-500 text-white py-3 rounded-xl text-sm font-semibold hover:bg-green-600 transition">
+                  ✅ {Object.values(importChecked).filter(Boolean).length}件をインポート
+                </button>
+              </div>
+            )}
+            {importText && importParsed.length === 0 && (
+              <div className="text-center text-gray-400 py-6 bg-white rounded-xl text-sm">
+                「解析する」を押してください
+              </div>
+            )}
           </div>
         )}
 
